@@ -26,7 +26,7 @@ unit libMPV.Render;
 
 interface
 
-uses ctypes, UWlibMPV.Client;
+uses ctypes, libMPV.Client;
 
 // -----------------------------------------------------------------------------
 

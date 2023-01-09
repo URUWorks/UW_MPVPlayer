@@ -31,7 +31,8 @@ interface
 
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
-  LMessages, LResources, LazarusPackageIntf, libMPV.Client, UWlibMPV.Thread;
+  LMessages, LResources, LazarusPackageIntf, libMPV.Client, UWlibMPV.Thread
+  {$IFDEF SDL2}, sdl2, libMPV.Render, libMPV.Render_gl, ctypes{$ENDIF};
 
 // -----------------------------------------------------------------------------
 
@@ -71,6 +72,17 @@ type
     FTimer        : TTimer;
     {$ENDIF}
 
+    {$IFDEF SDL2}
+    sdlError         : Integer;
+    sdlWindow        : PSDL_Window;
+    sdlGLContext     : TSDL_GLContext;
+    mpvRenderParams  : array of mpv_render_param;
+    mpvOpenGLParams  : mpv_opengl_init_params;
+    mpvRenderContext : pmpv_render_context;
+    sdlEvent         : TUWlibMPVThreadEvent;
+    sdlInitialized   : Boolean;
+    {$ENDIF}
+
     FOnStartFile: TNotifyEvent;           // Notification before playback start of a file (before the file is loaded).
     FOnEndFile: TUWLibMPVNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
     FOnFileLoaded: TNotifyEvent;          // Notification when the file has been loaded (headers were read etc.)
@@ -82,6 +94,11 @@ type
 
     procedure PushEvent;
     procedure ReceivedEvent(Sender: TObject);
+    {$IFDEF SDL2}
+    procedure PushSdlEvent;
+    procedure ReceivedSdlEvent(Sender: TObject);
+    {$ENDIF}
+
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
     {$ENDIF}
@@ -90,6 +107,11 @@ type
     destructor Destroy; override;
     function Initialize: Boolean;
     procedure UnInitialize;
+
+    {$IFDEF SDL2}
+    function InitializeSDL2: Boolean;
+    function UnInitializeSDL2: Boolean;
+    {$ENDIF}
 
     procedure mpv_command_(Args: Array of const);
     procedure mpv_set_option_string_(const AValue: String);
@@ -128,6 +150,9 @@ type
     property Initialized   : Boolean            read FInitialized;
     property StartOptions  : TStringList        read FStartOptions;
     property TrackList     : TUWLibMPVTrackList read FTrackList;
+    {$IFDEF SDL2}
+    property ErrorSDL      : Integer            read sdlError;
+    {$ENDIF}
 
     {$IFDEF USETIMER}
     property Timer         : TTimer read FTimer;
@@ -192,10 +217,16 @@ implementation
 
 const
    LIBMPV_MAX_VOLUME = 100;
+{$IFDEF SDL2}
+  glFlip: Longint = 1;
+
+var
+  sdlRenderEventId: cuint32;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
-{ libmpv wakeup_event }
+{ libmpv wakeup_events }
 
 // -----------------------------------------------------------------------------
 
@@ -203,6 +234,30 @@ procedure LIBMPV_EVENT(Sender: Pointer); cdecl;
 begin
   if (Sender <> NIL) then TUWlibMPV(Sender).PushEvent;
 end;
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF SDL2}
+procedure LIBMPV_RENDER_EVENT(Sender: Pointer); cdecl;
+var
+  Event: PSDL_Event;
+begin
+  if (Sender <> NIL) then
+  begin
+    New(Event);
+    Event^.type_:= sdlRenderEventId;
+    SDL_PushEvent(Event);
+    TUWlibMPV(Sender).PushSdlEvent;
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+function get_proc_address_mpv(ctx: Pointer; Name: PChar): Pointer; cdecl;
+begin
+  Result := SDL_GL_GetProcAddress(Name);
+end;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
@@ -347,6 +402,11 @@ begin
   FTimer.OnTimer  := @DoTimer;
   {$ENDIF}
 
+  {$IFDEF SDL2}
+  sdlRenderEventId := -1;
+  sdlInitialized   := False;
+  {$ENDIF}
+
   with FStartOptions do
   begin
     Add('hwdec=auto');       // enable best hw decoder
@@ -421,6 +481,10 @@ begin
   FMPVEvent.OnEvent := @ReceivedEvent;
   mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
 
+  {$IFDEF SDL2}
+  InitializeSDL2;
+  {$ENDIF}
+
   FInitialized := True;
   Result := True;
 end;
@@ -433,6 +497,10 @@ begin
 
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
+
+  {$IFDEF SDL2}
+  UnInitializeSDL2;
+  {$ENDIF}
 
   if Assigned(FMPVEvent) then
   begin
@@ -447,6 +515,99 @@ begin
   SetLength(FTrackList, 0);
   FInitialized := False;
 end;
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF SDL2}
+function TUWlibMPV.InitializeSDL2: Boolean;
+begin
+  Result   := False;
+  sdlError := 0;
+  sdlEvent := NIL;
+
+  SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, 'no');
+
+  // initilization of video subsystem
+  sdlError := SDL_Init(SDL_INIT_VIDEO);
+  if sdlError < 0 then // 0 on success and a negative error code on failure.
+    Exit;
+
+  SDL_SetHint(SDL_HINT_VIDEO_FOREIGN_WINDOW_OPENGL, '1'); // let SDL know that a foreign window will be used with OpenGL
+  sdlWindow := SDL_CreateWindowFrom(Pointer(Self.Handle));
+  if sdlWindow = NIL then // failed to create SDL window
+  begin
+    sdlError := -1;
+    Exit;
+  end;
+
+  sdlGLContext := SDL_GL_CreateContext(sdlWindow);
+  if @sdlGLContext = NIL then
+  begin
+    sdlError := -3;
+    Exit;
+  end;
+
+  mpvOpenGLParams.get_proc_address := @get_proc_address_mpv;
+  mpvOpenGLParams.get_proc_address_ctx := NIL;
+
+  SetLength(mpvRenderParams, 4);
+  mpvRenderParams[0]._type := MPV_RENDER_PARAM_API_TYPE;
+  mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_OPENGL);
+  mpvRenderParams[1]._type := MPV_RENDER_PARAM_OPENGL_INIT_PARAMS;
+  mpvRenderParams[1].Data  := @mpvOpenGLParams;
+  mpvRenderParams[2]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
+  mpvRenderParams[2].Data  := @glFlip;
+  mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
+  mpvRenderParams[3].Data  := NIL;
+
+  if not Load_libMPV_Render then
+  begin
+    sdlError := -4;
+    Exit;
+  end;
+
+  sdlError := mpv_render_context_create(mpvRenderContext, FMPV_HANDLE^, Pmpv_render_param(@mpvRenderParams[0]));
+  if sdlError <> 0 then Exit;
+
+  sdlEvent := TUWlibMPVThreadEvent.Create;
+  sdlEvent.OnEvent := @ReceivedSdlEvent;
+
+  sdlRenderEventId := SDL_RegisterEvents(1);
+  mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Self);
+
+  sdlInitialized := True;
+  Result := sdlInitialized;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TUWlibMPV.UnInitializeSDL2: Boolean;
+begin
+  sdlInitialized := False;
+  Result := False;
+
+  if Assigned(mpv_render_context_free) and  Assigned(mpvRenderContext) then
+    mpv_render_context_free(mpvRenderContext^);
+
+  SetLength(mpvRenderParams, 0);
+  Free_libMPV_Render;
+
+  if Assigned(sdlEvent) then
+  begin
+    sdlEvent.Free;
+    sdlEvent := NIL;
+  end;
+
+  SDL_GL_DeleteContext(sdlGLContext);
+  SDL_DestroyWindow(sdlWindow);
+
+  //closing SDL2
+  SDL_Quit;
+
+  sdlRenderEventId := -1;
+  Result := True;
+end;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
@@ -735,6 +896,79 @@ begin
     end;
   end;
 end;
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF SDL2}
+procedure TUWLibMPV.PushSdlEvent;
+begin
+  if Assigned(sdlEvent) then sdlEvent.PushEvent;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TUWLibMPV.ReceivedSdlEvent(Sender: TObject);
+var
+  Event  : PSDL_Event;
+  mpvfbo : mpv_opengl_fbo;
+  redraw : Boolean;
+  flags  : uint64;
+  params : array of mpv_render_param;
+begin
+  SetLength(params, 3);
+  redraw := False;
+  New(Event);
+  try
+    while SDL_WaitEvent(Event) = 1 do
+    begin
+      case Event^.type_ of
+        SDL_QUITEV:
+        begin
+          UnInitialize;
+          Break;
+        end;
+
+        SDL_WINDOWEVENT:
+        begin
+          if Event^.type_ = SDL_WINDOWEVENT_EXPOSED then // Window has been exposed and should be redrawn
+            redraw := True
+          else
+            Break;
+        end;
+      else
+        if Event^.type_ = sdlRenderEventId then // Happens when there is new work for the render thread (such as rendering a new video frame or redrawing it).
+        begin
+          flags := mpv_render_context_update(mpvRenderContext^);
+          if (flags and MPV_RENDER_UPDATE_FRAME) <> 0 then
+            redraw := True;
+        end;
+      end;
+
+      if redraw then // redraw sdl window
+      begin
+        mpvfbo.fbo := 0;
+        mpvfbo.w   := Self.Width;
+        mpvfbo.h   := Self.Height;
+
+        params[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
+        params[0].Data  := @mpvfbo;
+        params[1]._type := MPV_RENDER_PARAM_FLIP_Y;
+        params[1].Data  := @glFlip;
+        params[2]._type := MPV_RENDER_PARAM_INVALID;
+        params[2].Data  := NIL;
+
+        mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@params[0]));
+        SDL_GL_SwapWindow(sdlWindow);
+
+        Break;
+      end;
+    end;
+  finally
+    Dispose(Event);
+    SetLength(params, 0);
+  end;
+end;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 

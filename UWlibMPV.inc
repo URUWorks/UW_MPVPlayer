@@ -20,4 +20,5 @@
 
 {$mode ObjFPC}{$H+}
 {$DEFINE USETIMER}
+{$DEFINE SDL2}
 
