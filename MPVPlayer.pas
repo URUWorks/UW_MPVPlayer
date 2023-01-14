@@ -91,6 +91,13 @@ type
 
     FOnGlDraw : TBGLRedrawEvent;
 
+    function Initialize: Boolean;
+    procedure UnInitialize;
+
+    function InitializeGl: Boolean;
+    function UnInitializeGl: Boolean;
+    procedure Update_mpvfbo;
+
     procedure PushEvent;
     procedure ReceivedEvent(Sender: TObject);
 
@@ -103,13 +110,6 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    function Initialize: Boolean;
-    procedure UnInitialize;
-
-    function InitializeGl: Boolean;
-    function UnInitializeGl: Boolean;
-
-    procedure Update_mpvfbo;
     procedure DoOnPaint; override;
 
     procedure mpv_command_(Args: Array of const);
