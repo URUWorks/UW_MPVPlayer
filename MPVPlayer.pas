@@ -76,6 +76,7 @@ type
     FRenderer     : TMPVPlayerRenderer;
 
     mpvRenderParams  : array of mpv_render_param;
+    mpvUpdateParams  : array of mpv_render_param;
     mpvOpenGLParams  : mpv_opengl_init_params;
     mpvRenderContext : pmpv_render_context;
     mpvfbo           : mpv_opengl_fbo;
@@ -575,13 +576,13 @@ begin
 
   // Update params
   Update_mpvfbo;
-  SetLength(mpvRenderParams, 3);
-  mpvRenderParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
-  mpvRenderParams[0].Data  := @mpvfbo;
-  mpvRenderParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-  mpvRenderParams[1].Data  := @glFlip;
-  mpvRenderParams[2]._type := MPV_RENDER_PARAM_INVALID;
-  mpvRenderParams[2].Data  := NIL;
+  SetLength(mpvUpdateParams, 3);
+  mpvUpdateParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
+  mpvUpdateParams[0].Data  := @mpvfbo;
+  mpvUpdateParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
+  mpvUpdateParams[1].Data  := @glFlip;
+  mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
+  mpvUpdateParams[2].Data  := NIL;
 
   FGlInitialized := True;
   Result := FGlInitialized;
@@ -605,6 +606,7 @@ begin
   if Assigned(mpv_render_context_free) and  Assigned(mpvRenderContext) then
     mpv_render_context_free(mpvRenderContext^);
 
+  SetLength(mpvUpdateParams, 0);
   SetLength(mpvRenderParams, 0);
   Free_libMPV_Render;
 
@@ -641,7 +643,7 @@ begin
   Update_mpvfbo;
 
   if (FState <> ssPlay) and FGlInitialized then
-    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvRenderParams[0]));
+    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
 
   if Assigned(FOnGlDraw) then FOnGlDraw(Self, ctx);
 
@@ -961,7 +963,7 @@ begin
   begin
     Update_mpvfbo;
 
-    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvRenderParams[0]));
+    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
     if Assigned(FOnGlDraw) then FOnGlDraw(Self, ctx);
     SwapBuffers;
     mpv_render_context_report_swap(mpvRenderContext^);
