@@ -39,8 +39,9 @@ uses
 
 type
 
-  { TMPVControl Types }
+  { TMPVPlayer Types }
 
+  TMPVPlayerRenderer    = (rmEmbedding, rmOpenGL);
   TMPVPlayerSate        = (ssStop, ssPlay, ssPause, ssEnd);
   TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
@@ -72,6 +73,7 @@ type
     {$IFDEF USETIMER}
     FTimer        : TTimer;
     {$ENDIF}
+    FRenderer     : TMPVPlayerRenderer;
 
     mpvRenderParams  : array of mpv_render_param;
     mpvOpenGLParams  : mpv_opengl_init_params;
@@ -103,6 +105,8 @@ type
 
     procedure PushRenderEvent;
     procedure ReceivedRenderEvent(Sender: TObject);
+
+    procedure SetRenderer(Value: TMPVPlayerRenderer);
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -223,6 +227,7 @@ type
 
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
+    property RendererMode: TMPVPlayerRenderer read FRenderer write SetRenderer;
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
     property OnEndFile: TMPVPlayerNotifyEvent read FOnEndFile write FOnEndFile;
@@ -407,6 +412,7 @@ begin
   FState         := ssStop;
   FAutoStart     := True;
   FAutoLoadSub   := False;
+  FRenderer      := rmOpenGL;
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
 
@@ -421,7 +427,7 @@ begin
   begin
     Add('hwdec=auto');       // enable best hw decoder
     Add('keep-open=always'); // don't auto close video
-    Add('vd-lavc-dr=no');    // fix possibles deadlock issues
+    Add('vd-lavc-dr=no');    // fix possibles deadlock issues with OpenGL
   end;
 end;
 
@@ -474,13 +480,19 @@ begin
   for i := 0 to FStartOptions.Count-1 do
     mpv_set_option_string_(FStartOptions[i]);
 
-  // Set our window handle (not necessary for OpenGl)
-  {$IFDEF LINUX}
-  pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
-  {$ELSE}
-  pHwnd := Self.Handle;
-  {$ENDIF}
-  FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
+  if FRenderer = rmEmbedding then
+  begin
+    // Set our window handle (not necessary for OpenGl)
+    {$IFDEF LINUX}
+    pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
+    {$ELSE}
+    pHwnd := Self.Handle;
+    {$ENDIF}
+    FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
+
+    if FError <> MPV_ERROR_SUCCESS then
+      Exit;
+  end;
 
   {$IFNDEF USETIMER}
   mpv_observe_property(FMPV_HANDLE^, 0, 'playback-time', MPV_FORMAT_INT64);
@@ -493,7 +505,8 @@ begin
   FMPVEvent.OnEvent := @ReceivedEvent;
   mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
 
-  InitializeGl;
+  if FRenderer = rmOpenGL then
+    InitializeGl;
 
   FInitialized := True;
   Result := True;
@@ -514,7 +527,8 @@ begin
     FMPVEvent := NIL;
   end;
 
-  UnInitializeGl;
+  if FRenderer = rmOpenGL then
+    UnInitializeGl;
 
   if Assigned(mpv_terminate_destroy) and Assigned(FMPV_HANDLE) then
     mpv_terminate_destroy(FMPV_HANDLE^);
@@ -624,7 +638,6 @@ begin
   else
     BGLViewPort(ClientWidth, ClientHeight, ColorToBGRA(Color));
 
-  MakeCurrent;
   Update_mpvfbo;
 
   if (FState <> ssPlay) and FGlInitialized then
@@ -946,7 +959,6 @@ begin
 
   while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
   begin
-    MakeCurrent;
     Update_mpvfbo;
 
     mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvRenderParams[0]));
@@ -956,6 +968,14 @@ begin
   end;
 
   ReleaseBGLContext(ctx);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetRenderer(Value: TMPVPlayerRenderer);
+begin
+  if not Initialized and (FRenderer <> Value) then
+    FRenderer := Value;
 end;
 
 // -----------------------------------------------------------------------------
