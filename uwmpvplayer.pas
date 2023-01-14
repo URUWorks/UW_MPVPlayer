@@ -2,21 +2,21 @@
   This source is only used to compile and install the package.
  }
 
-unit uwlibmpvlaz;
+unit UWMPVPlayer;
 
 {$warn 5023 off : no warning about unused units}
 interface
 
 uses
-  UWlibMPV, LazarusPackageIntf;
+  MPVPlayer, MPVPlayer.Thread, LazarusPackageIntf;
 
 implementation
 
 procedure Register;
 begin
-  RegisterUnit('UWlibMPV', @UWlibMPV.Register);
+  RegisterUnit('MPVPlayer', @MPVPlayer.Register);
 end;
 
 initialization
-  RegisterPackage('uwlibmpvlaz', @Register);
+  RegisterPackage('UWMPVPlayer', @Register);
 end.

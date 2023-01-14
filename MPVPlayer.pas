@@ -1,5 +1,5 @@
 {*
- *  URUWorks libMPV
+ *  URUWorks MPVPlayer
  *
  *  Author  : URUWorks
  *  Website : uruworks.net
@@ -21,18 +21,19 @@
  *  Copyright (C) 2020 Marco Caselli.
  *}
 
-unit UWlibMPV;
+unit MPVPlayer;
 
 // -----------------------------------------------------------------------------
 
-{$I UWlibMPV.inc}
+{$I MPVPlayer.inc}
 
 interface
 
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
-  LMessages, LResources, LazarusPackageIntf, libMPV.Client, UWlibMPV.Thread
-  {$IFDEF SDL2}, sdl2, libMPV.Render, libMPV.Render_gl, ctypes{$ENDIF};
+  LMessages, LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
+  BGLVirtualScreen, libMPV.Render, libMPV.Render_gl, gl, glext, BGRAOpenGL,
+  BGRABitmapTypes;
 
 // -----------------------------------------------------------------------------
 
@@ -40,64 +41,61 @@ type
 
   { TMPVControl Types }
 
-  TUWLibMPVSate        = (ssStop, ssPlay, ssPause, ssEnd);
-  TUWLibMPVTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
-  TUWLibMPVNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
+  TMPVPlayerSate        = (ssStop, ssPlay, ssPause, ssEnd);
+  TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
+  TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
 
-  TUWLibMPVTrackInfo = record
-    Kind     : TUWLibMPVTrackType;
+  TMPVPlayerTrackInfo = record
+    Kind     : TMPVPlayerTrackType;
     ID       : Integer;
     Codec    : String;
     Lang     : String;
     Selected : Boolean;
   end;
 
-  TUWLibMPVTrackList = array of TUWLibMPVTrackInfo;
+  TMPVPlayerTrackList = array of TMPVPlayerTrackInfo;
 
-  { TUWlibMPV }
+  { TMPVPlayer }
 
-  TUWLibMPV = class(TCustomPanel)
+  TMPVPlayer = class(TCustomBGLVirtualScreen)
   private
     FMPV_HANDLE   : Pmpv_handle;
     FError        : mpv_error;
     FVersion      : DWord;
     FInitialized  : Boolean;
     FStartOptions : TStringList;
-    FMPVEvent     : TUWlibMPVThreadEvent;
-    FState        : TUWLibMPVSate;
-    FTrackList    : TUWLibMPVTrackList;
+    FMPVEvent     : TMPVPlayerThreadEvent;
+    FState        : TMPVPlayerSate;
+    FTrackList    : TMPVPlayerTrackList;
     FAutoStart    : Boolean;
     FAutoLoadSub  : Boolean;
     {$IFDEF USETIMER}
     FTimer        : TTimer;
     {$ENDIF}
 
-    {$IFDEF SDL2}
-    sdlError         : Integer;
-    sdlWindow        : PSDL_Window;
-    sdlGLContext     : TSDL_GLContext;
     mpvRenderParams  : array of mpv_render_param;
     mpvOpenGLParams  : mpv_opengl_init_params;
     mpvRenderContext : pmpv_render_context;
-    sdlEvent         : TUWlibMPVThreadEvent;
-    sdlInitialized   : Boolean;
-    {$ENDIF}
+    mpvfbo           : mpv_opengl_fbo;
+    FGlEvent         : TMPVPlayerThreadEvent;
+    FGlInitialized   : Boolean;
 
-    FOnStartFile: TNotifyEvent;           // Notification before playback start of a file (before the file is loaded).
-    FOnEndFile: TUWLibMPVNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
-    FOnFileLoaded: TNotifyEvent;          // Notification when the file has been loaded (headers were read etc.)
-    FOnVideoReconfig: TNotifyEvent;       // Happens after video changed in some way.
-    FOnAudioReconfig: TNotifyEvent;       // Similar to VIDEO_RECONFIG.
-    FOnSeek: TUWLibMPVNotifyEvent;        // Happens when a seek was initiated.
-    FOnPlaybackRestart: TNotifyEvent;     // Usually happens on start of playback and after seeking.
-    FOnTimeChanged: TUWLibMPVNotifyEvent; // Notify playback time, AParam is current position.
+    FOnStartFile: TNotifyEvent;            // Notification before playback start of a file (before the file is loaded).
+    FOnEndFile: TMPVPlayerNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
+    FOnFileLoaded: TNotifyEvent;           // Notification when the file has been loaded (headers were read etc.)
+    FOnVideoReconfig: TNotifyEvent;        // Happens after video changed in some way.
+    FOnAudioReconfig: TNotifyEvent;        // Similar to VIDEO_RECONFIG.
+    FOnSeek: TMPVPlayerNotifyEvent;        // Happens when a seek was initiated.
+    FOnPlaybackRestart: TNotifyEvent;      // Usually happens on start of playback and after seeking.
+    FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
+
+    FOnGlDraw : TBGLRedrawEvent;
 
     procedure PushEvent;
     procedure ReceivedEvent(Sender: TObject);
-    {$IFDEF SDL2}
-    procedure PushSdlEvent;
-    procedure ReceivedSdlEvent(Sender: TObject);
-    {$ENDIF}
+
+    procedure PushRenderEvent;
+    procedure ReceivedRenderEvent(Sender: TObject);
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -108,10 +106,11 @@ type
     function Initialize: Boolean;
     procedure UnInitialize;
 
-    {$IFDEF SDL2}
-    function InitializeSDL2: Boolean;
-    function UnInitializeSDL2: Boolean;
-    {$ENDIF}
+    function InitializeGl: Boolean;
+    function UnInitializeGl: Boolean;
+
+    procedure Update_mpvfbo;
+    procedure DoOnPaint; override;
 
     procedure mpv_command_(Args: Array of const);
     procedure mpv_set_option_string_(const AValue: String);
@@ -138,21 +137,18 @@ type
     procedure SetPlaybackRate(const AValue: Byte);
     function GetAudioVolume: Integer;
     procedure SetAudioVolume(const AValue: Integer);
-    procedure SetMediaTrack(const TrackType: TUWLibMPVTrackType; const ID: Integer); overload;
+    procedure SetMediaTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
     procedure SetMediaTrack(const Index: Integer); overload;
     procedure GetMediaTracks;
 
-    property mpv_handle    : Pmpv_handle        read FMPV_HANDLE;
-    property Error         : mpv_error          read FError;
-    property ErrorString   : String             read GetErrorString;
-    property Version       : DWord              read FVersion;
-    property VersionString : String             read GetVersionString;
-    property Initialized   : Boolean            read FInitialized;
-    property StartOptions  : TStringList        read FStartOptions;
-    property TrackList     : TUWLibMPVTrackList read FTrackList;
-    {$IFDEF SDL2}
-    property ErrorSDL      : Integer            read sdlError;
-    {$ENDIF}
+    property mpv_handle    : Pmpv_handle         read FMPV_HANDLE;
+    property Error         : mpv_error           read FError;
+    property ErrorString   : String              read GetErrorString;
+    property Version       : DWord               read FVersion;
+    property VersionString : String              read GetVersionString;
+    property Initialized   : Boolean             read FInitialized;
+    property StartOptions  : TStringList         read FStartOptions;
+    property TrackList     : TMPVPlayerTrackList read FTrackList;
 
     {$IFDEF USETIMER}
     property Timer         : TTimer read FTimer;
@@ -160,53 +156,82 @@ type
   published
     property Align;
     property Anchors;
+    property AutoSize;
+    property BorderSpacing;
+    property BevelInner;
+    property BevelOuter;
+    property BevelWidth;
+    property BidiMode;
+    property BorderWidth;
+    property BorderStyle;
+    property Caption;
+    property ChildSizing;
+    property ClientHeight;
+    property ClientWidth;
     property Color default clBlack;
-    property Width default 320;
-    property Height default 240;
     property Constraints;
+    property DockSite;
+    property DragCursor;
     property DragKind;
     property DragMode;
+    property Enabled;
+    property Font;
+    property ParentBidiMode;
+    property ParentColor;
+    property ParentFont;
     property ParentShowHint;
     property PopupMenu;
     property ShowHint;
+    property TabOrder;
+    property TabStop default True;
+    property UseDockManager default True;
     property Visible;
+    property Width default 320;
+    property Height default 240;
     property OnClick;
-    property OnConstrainedResize;
+    property OnContextPopup;
     property OnDockDrop;
     property OnDockOver;
     property OnDblClick;
     property OnDragDrop;
     property OnDragOver;
+    property OnElapse;
     property OnEndDock;
     property OnEndDrag;
     property OnEnter;
     property OnExit;
+    property OnFramesPerSecond;
     property OnGetSiteInfo;
+    property OnGetDockCaption;
+    property OnLoadTextures;
+    property OnUnloadTextures;
     property OnMouseDown;
     property OnMouseEnter;
     property OnMouseLeave;
     property OnMouseMove;
     property OnMouseUp;
-    property OnMouseWheelUp;
+    property OnMouseWheel;
     property OnMouseWheelDown;
+    property OnMouseWheelUp;
     property OnResize;
     property OnStartDock;
     property OnStartDrag;
     property OnUnDock;
-    property TabOrder;
-    property TabStop default True;
+    property SmoothedElapse;
+
+    property OnDraw: TBGLRedrawEvent Read FOnGlDraw Write FOnGlDraw;
 
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
-    property OnEndFile: TUWLibMPVNotifyEvent read FOnEndFile write FOnEndFile;
+    property OnEndFile: TMPVPlayerNotifyEvent read FOnEndFile write FOnEndFile;
     property OnFileLoaded: TNotifyEvent read FOnFileLoaded write FOnFileLoaded;
     property OnVideoReconfig: TNotifyEvent read FOnVideoReconfig write FOnVideoReconfig;
     property OnAudioReconfig: TNotifyEvent read FOnAudioReconfig write FOnAudioReconfig;
-    property OnSeek: TUWLibMPVNotifyEvent read FOnSeek write FOnSeek;
+    property OnSeek: TMPVPlayerNotifyEvent read FOnSeek write FOnSeek;
     property OnPlaybackRestart: TNotifyEvent read FOnPlaybackRestart write FOnPlaybackRestart;
-    property OnTimeChanged: TUWLibMPVNotifyEvent read FOnTimeChanged write FOnTimeChanged;
+    property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
   end;
 
 procedure Register;
@@ -216,13 +241,8 @@ procedure Register;
 implementation
 
 const
-   LIBMPV_MAX_VOLUME = 100;
-{$IFDEF SDL2}
-  glFlip: Longint = 1;
-
-var
-  sdlRenderEventId: cuint32;
-{$ENDIF}
+  LIBMPV_MAX_VOLUME = 100;
+  glFlip: Longint   = 1;
 
 // -----------------------------------------------------------------------------
 
@@ -232,32 +252,25 @@ var
 
 procedure LIBMPV_EVENT(Sender: Pointer); cdecl;
 begin
-  if (Sender <> NIL) then TUWlibMPV(Sender).PushEvent;
+  if (Sender <> NIL) then TMPVPlayer(Sender).PushEvent;
 end;
 
 // -----------------------------------------------------------------------------
 
-{$IFDEF SDL2}
 procedure LIBMPV_RENDER_EVENT(Sender: Pointer); cdecl;
-var
-  Event: PSDL_Event;
 begin
-  if (Sender <> NIL) then
-  begin
-    New(Event);
-    Event^.type_:= sdlRenderEventId;
-    SDL_PushEvent(Event);
-    TUWlibMPV(Sender).PushSdlEvent;
-  end;
+  if (Sender <> NIL) then TMPVPlayer(Sender).PushRenderEvent;
 end;
 
 // -----------------------------------------------------------------------------
 
 function get_proc_address_mpv(ctx: Pointer; Name: PChar): Pointer; cdecl;
 begin
-  Result := SDL_GL_GetProcAddress(Name);
+  Result := GetProcAddress(LibGL, Name);
+
+  if Result = NIL then
+    Result := wglGetProcAddress(Name);
 end;
-{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
@@ -265,7 +278,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWlibMPV.mpv_command_(Args: Array of const);
+procedure TMPVPlayer.mpv_command_(Args: Array of const);
 var
   pArgs: array of PChar;
   i: Integer;
@@ -286,7 +299,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWlibMPV.mpv_set_option_string_(const AValue: String);
+procedure TMPVPlayer.mpv_set_option_string_(const AValue: String);
 var
   s1, s2: String;
   i: Integer;
@@ -310,7 +323,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TUWLibMPV.mpv_get_property_boolean(const APropertyName: String): Boolean;
+function TMPVPlayer.mpv_get_property_boolean(const APropertyName: String): Boolean;
 var
   p: Integer;
 begin
@@ -322,7 +335,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
+procedure TMPVPlayer.mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
 var
   p: Integer;
 begin
@@ -338,7 +351,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TUWlibMPV.mpv_get_property_double(const AProperty: String): Double;
+function TMPVPlayer.mpv_get_property_double(const AProperty: String): Double;
 begin
   if Initialized then
     FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @Result)
@@ -348,7 +361,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWlibMPV.mpv_set_property_double(const AProperty: String; const AValue: Double);
+procedure TMPVPlayer.mpv_set_property_double(const AProperty: String; const AValue: Double);
 begin
   if Initialized then
     FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue);
@@ -356,7 +369,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWlibMPV.mpv_set_property_int64(const AProperty: String; const AValue: Double);
+procedure TMPVPlayer.mpv_set_property_int64(const AProperty: String; const AValue: Double);
 begin
   if Initialized then
     FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @AValue);
@@ -364,11 +377,11 @@ end;
 
 // -----------------------------------------------------------------------------
 
-{ TUWlibMPV }
+{ TMPVPlayer }
 
 // -----------------------------------------------------------------------------
 
-constructor TUWlibMPV.Create(AOwner: TComponent);
+constructor TMPVPlayer.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
 
@@ -384,15 +397,17 @@ begin
   Caption          := '';
 
   // our control setup
-  FMPV_HANDLE   := NIL;
-  FVersion      := 0;
-  FError        := 0;
-  FInitialized  := False;
-  FMPVEvent     := NIL;
-  FState        := ssStop;
-  FAutoStart    := True;
-  FAutoLoadSub  := False;
-  FStartOptions := TStringList.Create;
+  FMPV_HANDLE    := NIL;
+  FVersion       := 0;
+  FError         := 0;
+  FInitialized   := False;
+  FGlInitialized := False;
+  FMPVEvent      := NIL;
+  FOnGlDraw      := NIL;
+  FState         := ssStop;
+  FAutoStart     := True;
+  FAutoLoadSub   := False;
+  FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
 
   {$IFDEF USETIMER}
@@ -402,21 +417,17 @@ begin
   FTimer.OnTimer  := @DoTimer;
   {$ENDIF}
 
-  {$IFDEF SDL2}
-  sdlRenderEventId := -1;
-  sdlInitialized   := False;
-  {$ENDIF}
-
   with FStartOptions do
   begin
     Add('hwdec=auto');       // enable best hw decoder
     Add('keep-open=always'); // don't auto close video
+    Add('vd-lavc-dr=no');    // fix possibles deadlock issues
   end;
 end;
 
 // -----------------------------------------------------------------------------
 
-destructor TUWlibMPV.Destroy;
+destructor TMPVPlayer.Destroy;
 begin
   UnInitialize;
 
@@ -432,11 +443,12 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TUWlibMPV.Initialize: Boolean;
+function TMPVPlayer.Initialize: Boolean;
 var
   i: Integer;
   pHwnd: PtrUInt;
 begin
+  FInitialized := False;
   Result := False;
 
   FError := Load_libMPV;
@@ -462,7 +474,7 @@ begin
   for i := 0 to FStartOptions.Count-1 do
     mpv_set_option_string_(FStartOptions[i]);
 
-  // Set our window handle
+  // Set our window handle (not necessary for OpenGl)
   {$IFDEF LINUX}
   pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
   {$ELSE}
@@ -477,13 +489,11 @@ begin
   FError := mpv_initialize(FMPV_HANDLE^);
   FError := mpv_request_log_messages(FMPV_HANDLE^, 'no');
 
-  FMPVEvent := TUWlibMPVThreadEvent.Create;
+  FMPVEvent := TMPVPlayerThreadEvent.Create;
   FMPVEvent.OnEvent := @ReceivedEvent;
   mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
 
-  {$IFDEF SDL2}
-  InitializeSDL2;
-  {$ENDIF}
+  InitializeGl;
 
   FInitialized := True;
   Result := True;
@@ -491,22 +501,20 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWlibMPV.UnInitialize;
+procedure TMPVPlayer.UnInitialize;
 begin
   if not Initialized then Exit;
 
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
 
-  {$IFDEF SDL2}
-  UnInitializeSDL2;
-  {$ENDIF}
-
   if Assigned(FMPVEvent) then
   begin
     FMPVEvent.Free;
     FMPVEvent := NIL;
   end;
+
+  UnInitializeGl;
 
   if Assigned(mpv_terminate_destroy) and Assigned(FMPV_HANDLE) then
     mpv_terminate_destroy(FMPV_HANDLE^);
@@ -518,38 +526,15 @@ end;
 
 // -----------------------------------------------------------------------------
 
-{$IFDEF SDL2}
-function TUWlibMPV.InitializeSDL2: Boolean;
+function TMPVPlayer.InitializeGl: Boolean;
 begin
-  Result   := False;
-  sdlError := 0;
-  sdlEvent := NIL;
-
-  SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, 'no');
-
-  // initilization of video subsystem
-  sdlError := SDL_Init(SDL_INIT_VIDEO);
-  if sdlError < 0 then // 0 on success and a negative error code on failure.
-    Exit;
-
-  SDL_SetHint(SDL_HINT_VIDEO_FOREIGN_WINDOW_OPENGL, '1'); // let SDL know that a foreign window will be used with OpenGL
-  sdlWindow := SDL_CreateWindowFrom(Pointer(Self.Handle));
-  if sdlWindow = NIL then // failed to create SDL window
-  begin
-    sdlError := -1;
-    Exit;
-  end;
-
-  sdlGLContext := SDL_GL_CreateContext(sdlWindow);
-  if @sdlGLContext = NIL then
-  begin
-    sdlError := -3;
-    Exit;
-  end;
+  Result := False;
+  FGlInitialized := False;
 
   mpvOpenGLParams.get_proc_address := @get_proc_address_mpv;
   mpvOpenGLParams.get_proc_address_ctx := NIL;
 
+  // Initialize params
   SetLength(mpvRenderParams, 4);
   mpvRenderParams[0]._type := MPV_RENDER_PARAM_API_TYPE;
   mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_OPENGL);
@@ -562,29 +547,46 @@ begin
 
   if not Load_libMPV_Render then
   begin
-    sdlError := -4;
+    FError := -1;
     Exit;
   end;
 
-  sdlError := mpv_render_context_create(mpvRenderContext, FMPV_HANDLE^, Pmpv_render_param(@mpvRenderParams[0]));
-  if sdlError <> 0 then Exit;
+  FError := mpv_render_context_create(mpvRenderContext, FMPV_HANDLE^, Pmpv_render_param(@mpvRenderParams[0]));
+  if FError <> 0 then Exit;
 
-  sdlEvent := TUWlibMPVThreadEvent.Create;
-  sdlEvent.OnEvent := @ReceivedSdlEvent;
+  FGlEvent := TMPVPlayerThreadEvent.Create;
+  FGlEvent.OnEvent := @ReceivedRenderEvent;
 
-  sdlRenderEventId := SDL_RegisterEvents(1);
   mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Self);
 
-  sdlInitialized := True;
-  Result := sdlInitialized;
+  // Update params
+  Update_mpvfbo;
+  SetLength(mpvRenderParams, 3);
+  mpvRenderParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
+  mpvRenderParams[0].Data  := @mpvfbo;
+  mpvRenderParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
+  mpvRenderParams[1].Data  := @glFlip;
+  mpvRenderParams[2]._type := MPV_RENDER_PARAM_INVALID;
+  mpvRenderParams[2].Data  := NIL;
+
+  FGlInitialized := True;
+  Result := FGlInitialized;
 end;
 
 // -----------------------------------------------------------------------------
 
-function TUWlibMPV.UnInitializeSDL2: Boolean;
+function TMPVPlayer.UnInitializeGl: Boolean;
 begin
-  sdlInitialized := False;
+  FGlInitialized := False;
   Result := False;
+
+  mpv_render_context_set_update_callback(mpvRenderContext^, NIL, Self);
+
+  if Assigned(FGlEvent) then
+  begin
+    FGlEvent.Free;
+    FGlEvent := NIL;
+  end;
 
   if Assigned(mpv_render_context_free) and  Assigned(mpvRenderContext) then
     mpv_render_context_free(mpvRenderContext^);
@@ -592,33 +594,62 @@ begin
   SetLength(mpvRenderParams, 0);
   Free_libMPV_Render;
 
-  if Assigned(sdlEvent) then
-  begin
-    sdlEvent.Free;
-    sdlEvent := NIL;
-  end;
-
-  SDL_GL_DeleteContext(sdlGLContext);
-  SDL_DestroyWindow(sdlWindow);
-
-  //closing SDL2
-  SDL_Quit;
-
-  sdlRenderEventId := -1;
   Result := True;
 end;
-{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
-function TUWlibMPV.GetPlayerHandle: Pmpv_handle;
+procedure TMPVPlayer.Update_mpvfbo;
+begin
+  mpvfbo.fbo := 0;
+  mpvfbo.w   := ClientWidth;
+  mpvfbo.h   := ClientHeight;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.DoOnPaint;
+var
+  ctx: TBGLContext;
+begin
+  if FGlInitialized and (FState = ssPlay) then Exit;
+
+  ctx := PrepareBGLContext;
+
+  if Color = clNone then
+    BGLViewPort(ClientWidth, ClientHeight)
+  else
+  if Color = clDefault then
+    BGLViewPort(ClientWidth, ClientHeight, ColorToBGRA(clWindow))
+  else
+    BGLViewPort(ClientWidth, ClientHeight, ColorToBGRA(Color));
+
+  MakeCurrent;
+  Update_mpvfbo;
+
+  if (FState <> ssPlay) and FGlInitialized then
+    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvRenderParams[0]));
+
+  if Assigned(FOnGlDraw) then FOnGlDraw(Self, ctx);
+
+  SwapBuffers;
+
+  if FGlInitialized then
+    mpv_render_context_report_swap(mpvRenderContext^);
+
+  ReleaseBGLContext(ctx);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetPlayerHandle: Pmpv_handle;
 begin
   Result := FMPV_HANDLE;
 end;
 
 // -----------------------------------------------------------------------------
 
-function TUWlibMPV.GetErrorString: String;
+function TMPVPlayer.GetErrorString: String;
 begin
   if Assigned(mpv_error_string) then
     Result := mpv_error_string(FError)
@@ -628,14 +659,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TUWlibMPV.GetVersionString: String;
+function TMPVPlayer.GetVersionString: String;
 begin
   Result := Format('libmpv %d.%d', [FVersion shr 16, FVersion and $FF]);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.Play(const AFileName: String);
+procedure TMPVPlayer.Play(const AFileName: String);
 begin
   if not Initialized then
     Initialize;
@@ -645,7 +676,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.Pause;
+procedure TMPVPlayer.Pause;
 begin
   if FState = ssPlay then
   begin
@@ -661,7 +692,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.Resume;
+procedure TMPVPlayer.Resume;
 begin
   if FState = ssPause then
   begin
@@ -672,7 +703,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.Stop;
+procedure TMPVPlayer.Stop;
 begin
   if FState <> ssStop then
   begin
@@ -684,28 +715,28 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TUWLibMPV.GetMediaLenInMs: Integer;
+function TMPVPlayer.GetMediaLenInMs: Integer;
 begin
   Result := Trunc(mpv_get_property_double('duration') * 1000);
 end;
 
 // -----------------------------------------------------------------------------
 
-function TUWLibMPV.GetMediaPosInMs: Integer;
+function TMPVPlayer.GetMediaPosInMs: Integer;
 begin
   Result := Trunc(mpv_get_property_double('time-pos') * 1000);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.SetMediaPosInMs(const AValue: Integer);
+procedure TMPVPlayer.SetMediaPosInMs(const AValue: Integer);
 begin
   mpv_set_property_double('time-pos', AValue / 1000);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.SeekInMs(const MSecs: Integer; const SeekAbsolute: Boolean = True);
+procedure TMPVPlayer.SeekInMs(const MSecs: Integer; const SeekAbsolute: Boolean = True);
 begin
   if SeekAbsolute then
     SetMediaPosInMs(MSecs)
@@ -714,42 +745,42 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
-procedure TUWLibMPV.NextFrame;
+procedure TMPVPlayer.NextFrame;
 begin
   mpv_command_(['frame-step']);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.PreviousFrame;
+procedure TMPVPlayer.PreviousFrame;
 begin
   mpv_command_(['frame-back-step']);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.SetPlaybackRate(const AValue: Byte);
+procedure TMPVPlayer.SetPlaybackRate(const AValue: Byte);
 begin
   mpv_set_property_double('speed', AValue / 100.0);
 end;
 
 // -----------------------------------------------------------------------------
 
-function TUWLibMPV.GetAudioVolume: Integer;
+function TMPVPlayer.GetAudioVolume: Integer;
 begin
   Result := Trunc(mpv_get_property_double('volume') * (255 / LIBMPV_MAX_VOLUME));
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.SetAudioVolume(const AValue: Integer);
+procedure TMPVPlayer.SetAudioVolume(const AValue: Integer);
 begin
   mpv_set_property_double('volume', AValue * (LIBMPV_MAX_VOLUME / 255));
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.SetMediaTrack(const TrackType: TUWLibMPVTrackType; const ID: Integer);
+procedure TMPVPlayer.SetMediaTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer);
 var
   s: String;
 begin
@@ -766,14 +797,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.SetMediaTrack(const Index: Integer);
+procedure TMPVPlayer.SetMediaTrack(const Index: Integer);
 begin
   SetMediaTrack(TrackList[Index].Kind, TrackList[Index].ID);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.GetMediaTracks;
+procedure TMPVPlayer.GetMediaTracks;
 var
   Node, Map, Detail: mpv_node;
   i, j: integer;
@@ -789,7 +820,7 @@ begin
       begin
         map := Node.u.list^.values^[i];
         pc  := map.u.list^.keys;
-        FillByte(FTrackList[i], SizeOf(TUWLibMPVTrackInfo), 0);
+        FillByte(FTrackList[i], SizeOf(TMPVPlayerTrackInfo), 0);
 
         for j := 0 to map.u.list^.num -1 do
         begin
@@ -830,14 +861,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.PushEvent;
+procedure TMPVPlayer.PushEvent;
 begin
   if Assigned(FMPVEvent) then FMPVEvent.PushEvent;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.ReceivedEvent(Sender: TObject);
+procedure TMPVPlayer.ReceivedEvent(Sender: TObject);
 var
   Event: Pmpv_event;
 begin
@@ -899,81 +930,38 @@ end;
 
 // -----------------------------------------------------------------------------
 
-{$IFDEF SDL2}
-procedure TUWLibMPV.PushSdlEvent;
+procedure TMPVPlayer.PushRenderEvent;
 begin
-  if Assigned(sdlEvent) then sdlEvent.PushEvent;
+  if Assigned(FGlEvent) then FGlEvent.PushEvent;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWLibMPV.ReceivedSdlEvent(Sender: TObject);
+procedure TMPVPlayer.ReceivedRenderEvent(Sender: TObject);
 var
-  Event  : PSDL_Event;
-  mpvfbo : mpv_opengl_fbo;
-  redraw : Boolean;
-  flags  : uint64;
-  params : array of mpv_render_param;
+  ctx : TBGLContext;
 begin
-  SetLength(params, 3);
-  redraw := False;
-  New(Event);
-  try
-    while SDL_WaitEvent(Event) = 1 do
-    begin
-      case Event^.type_ of
-        SDL_QUITEV:
-        begin
-          UnInitialize;
-          Break;
-        end;
+  ctx := PrepareBGLContext;
+  BGLViewPort(ClientWidth, ClientHeight);
 
-        SDL_WINDOWEVENT:
-        begin
-          if Event^.type_ = SDL_WINDOWEVENT_EXPOSED then // Window has been exposed and should be redrawn
-            redraw := True
-          else
-            Break;
-        end;
-      else
-        if Event^.type_ = sdlRenderEventId then // Happens when there is new work for the render thread (such as rendering a new video frame or redrawing it).
-        begin
-          flags := mpv_render_context_update(mpvRenderContext^);
-          if (flags and MPV_RENDER_UPDATE_FRAME) <> 0 then
-            redraw := True;
-        end;
-      end;
+  while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
+  begin
+    MakeCurrent;
+    Update_mpvfbo;
 
-      if redraw then // redraw sdl window
-      begin
-        mpvfbo.fbo := 0;
-        mpvfbo.w   := Self.Width;
-        mpvfbo.h   := Self.Height;
-
-        params[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
-        params[0].Data  := @mpvfbo;
-        params[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-        params[1].Data  := @glFlip;
-        params[2]._type := MPV_RENDER_PARAM_INVALID;
-        params[2].Data  := NIL;
-
-        mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@params[0]));
-        SDL_GL_SwapWindow(sdlWindow);
-
-        Break;
-      end;
-    end;
-  finally
-    Dispose(Event);
-    SetLength(params, 0);
+    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvRenderParams[0]));
+    if Assigned(FOnGlDraw) then FOnGlDraw(Self, ctx);
+    SwapBuffers;
+    mpv_render_context_report_swap(mpvRenderContext^);
   end;
+
+  ReleaseBGLContext(ctx);
 end;
-{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
 {$IFDEF USETIMER}
-procedure TUWLibMPV.DoTimer(Sender: TObject);
+procedure TMPVPlayer.DoTimer(Sender: TObject);
 begin
   if Assigned(OnTimeChanged) then OnTimeChanged(Sender, GetMediaPosInMs);
 end;
@@ -983,20 +971,20 @@ end;
 
 procedure RegisterUWCompUnit;
 begin
-  RegisterComponents('URUWorks Multimedia', [TUWLibMPV]);
+  RegisterComponents('URUWorks Multimedia', [TMPVPlayer]);
 end;
 
 // -----------------------------------------------------------------------------
 
 procedure Register;
 begin
-  RegisterUnit('UWlibMPV', @RegisterUWCompUnit);
+  RegisterUnit('MPVPlayer', @RegisterUWCompUnit);
 end;
 
 // -----------------------------------------------------------------------------
 
 initialization
-  {$I UWlibMPV.lrs}
+  {$I MPVPlayer.lrs}
 
 // -----------------------------------------------------------------------------
 

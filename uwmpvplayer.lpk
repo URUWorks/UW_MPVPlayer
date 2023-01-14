@@ -2,27 +2,33 @@
 <CONFIG>
   <Package Version="5">
     <PathDelim Value="\"/>
-    <Name Value="uwlibmpvlaz"/>
+    <Name Value="UWMPVPlayer"/>
     <Type Value="RunAndDesignTime"/>
+    <Author Value="URUWorks"/>
     <CompilerOptions>
       <Version Value="11"/>
       <PathDelim Value="\"/>
       <SearchPaths>
-        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)\"/>
       </SearchPaths>
     </CompilerOptions>
+    <Description Value="MPVPlayer for Lazarus"/>
+    <Version Minor="1"/>
     <Files>
       <Item>
-        <Filename Value="UWlibMPV.pas"/>
+        <Filename Value="MPVPlayer.pas"/>
         <HasRegisterProc Value="True"/>
-        <UnitName Value="UWlibMPV"/>
+        <UnitName Value="MPVPlayer"/>
       </Item>
       <Item>
-        <Filename Value="UWlibMPV.lrs"/>
-        <Type Value="LRS"/>
+        <Filename Value="MPVPlayer.Thread.pas"/>
+        <UnitName Value="MPVPlayer.Thread"/>
       </Item>
     </Files>
     <RequiredPkgs>
+      <Item>
+        <PackageName Value="BGLControls"/>
+      </Item>
       <Item>
         <PackageName Value="LCLBase"/>
       </Item>

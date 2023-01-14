@@ -1,5 +1,5 @@
 {*
- *  URUWorks libMPV
+ *  URUWorks MPVPlayer
  *
  *  Author  : URUWorks
  *  Website : uruworks.net
@@ -21,7 +21,7 @@
  *  Copyright (C) 2020 Marco Caselli.
  *}
 
-unit UWlibMPV.Thread;
+unit MPVPlayer.Thread;
 
 // -----------------------------------------------------------------------------
 
@@ -38,24 +38,26 @@ type
 
   { TUWCustomThreadEvent }
 
-  TUWlibMPVThreadEvent = class;
+  TMPVPlayerThreadEvent = class;
 
-  TUWCustomThreadEvent = class(TThread)
+  TMPVPlayerCustomThreadEvent = class(TThread)
   private
     procedure HandleEvent;
+  protected
+    Procedure TerminatedSet; override;
   public
-    FOwner : TUWlibMPVThreadEvent;
+    FOwner : TMPVPlayerThreadEvent;
     Event  : PRtlEvent;
-    constructor Create(AOwner: TUWlibMPVThreadEvent);
+    constructor Create(AOwner: TMPVPlayerThreadEvent);
     procedure Execute; override;
     destructor Destroy; override;
   end;
 
-  { TUWlibMPVThreadEvent }
+  { TMPVPlayerThreadEvent }
 
-  TUWlibMPVThreadEvent = class
+  TMPVPlayerThreadEvent = class
   private
-    FThread  : TUWCustomThreadEvent;
+    FThread  : TMPVPlayerCustomThreadEvent;
     FOnEvent : TNotifyEvent;
   public
     constructor Create;
@@ -70,21 +72,37 @@ implementation
 
 // -----------------------------------------------------------------------------
 
-{ TUWCustomThreadEvent }
+{ TMPVPlayerCustomThreadEvent }
 
 // -----------------------------------------------------------------------------
 
-constructor TUWCustomThreadEvent.Create(AOwner: TUWlibMPVThreadEvent);
+constructor TMPVPlayerCustomThreadEvent.Create(AOwner: TMPVPlayerThreadEvent);
 begin
   inherited Create(True);
   FOwner   := AOwner;
   Event    := RTLEventCreate;
-  //Priority := tpHigher;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWCustomThreadEvent.Execute;
+destructor TMPVPlayerCustomThreadEvent.Destroy;
+begin
+  RTLEventDestroy(Event);
+  FOwner := NIL;
+  inherited Destroy;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayerCustomThreadEvent.TerminatedSet;
+begin
+  if Assigned(Event) then RTLEventSetEvent(Event);
+  inherited TerminatedSet;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayerCustomThreadEvent.Execute;
 begin
   while not Terminated do
   begin
@@ -96,50 +114,41 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWCustomThreadEvent.HandleEvent;
+procedure TMPVPlayerCustomThreadEvent.HandleEvent;
 begin
   if Assigned(FOwner.OnEvent) then FOwner.OnEvent(FOwner);
 end;
 
 // -----------------------------------------------------------------------------
 
-destructor TUWCustomThreadEvent.Destroy;
-begin
-  RTLEventDestroy(Event);
-  FOwner := NIL;
-  inherited Destroy;
-end;
+{ TMPVPlayerThreadEvent }
 
 // -----------------------------------------------------------------------------
 
-{ TUWlibMPVThreadEvent }
-
-// -----------------------------------------------------------------------------
-
-constructor TUWlibMPVThreadEvent.Create;
+constructor TMPVPlayerThreadEvent.Create;
 begin
   FOnEvent := NIL;
-  FThread  := TUWCustomThreadEvent.Create(Self);
+  FThread  := TMPVPlayerCustomThreadEvent.Create(Self);
+  FThread.FreeOnTerminate := True;
   FThread.Start;
 end;
 
 // -----------------------------------------------------------------------------
 
-destructor TUWlibMPVThreadEvent.Destroy;
+destructor TMPVPlayerThreadEvent.Destroy;
 begin
   FThread.Terminate;
-  RTLEventSetEvent(FThread.Event);
-  FThread.WaitFor;
-  FThread.Free;
+  FThread := NIL;
 
   inherited Destroy;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TUWlibMPVThreadEvent.PushEvent;
+procedure TMPVPlayerThreadEvent.PushEvent;
 begin
-  RTLEventSetEvent(FThread.Event);
+  if Assigned(FThread) then
+    RTLEventSetEvent(FThread.Event);
 end;
 
 // -----------------------------------------------------------------------------
