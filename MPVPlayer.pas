@@ -31,9 +31,8 @@ interface
 
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
-  LMessages, LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
-  BGLVirtualScreen, libMPV.Render, libMPV.Render_gl, gl, glext, BGRAOpenGL,
-  BGRABitmapTypes;
+  LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
+  MPVPlayer.RenderGL, BGLVirtualScreen;
 
 // -----------------------------------------------------------------------------
 
@@ -41,7 +40,7 @@ type
 
   { TMPVPlayer Types }
 
-  TMPVPlayerRenderer    = (rmEmbedding, rmOpenGL);
+  TMPVPlayerRenderMode  = (rmWindow, rmEmbedding, rmOpenGL);
   TMPVPlayerSate        = (ssStop, ssPlay, ssPause, ssEnd);
   TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
@@ -73,15 +72,8 @@ type
     {$IFDEF USETIMER}
     FTimer        : TTimer;
     {$ENDIF}
-    FRenderer     : TMPVPlayerRenderer;
-
-    mpvRenderParams  : array of mpv_render_param;
-    mpvUpdateParams  : array of mpv_render_param;
-    mpvOpenGLParams  : mpv_opengl_init_params;
-    mpvRenderContext : pmpv_render_context;
-    mpvfbo           : mpv_opengl_fbo;
-    FGlEvent         : TMPVPlayerThreadEvent;
-    FGlInitialized   : Boolean;
+    FRenderMode   : TMPVPlayerRenderMode;
+    FRenderGL     : TMPVPlayerRenderGL;
 
     FOnStartFile: TNotifyEvent;            // Notification before playback start of a file (before the file is loaded).
     FOnEndFile: TMPVPlayerNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
@@ -92,22 +84,16 @@ type
     FOnPlaybackRestart: TNotifyEvent;      // Usually happens on start of playback and after seeking.
     FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
 
-    FOnGlDraw : TBGLRedrawEvent;
-
     function Initialize: Boolean;
     procedure UnInitialize;
 
-    function InitializeGl: Boolean;
-    function UnInitializeGl: Boolean;
-    procedure Update_mpvfbo;
+    procedure InitializeRenderGL;
+    procedure UnInitializeRenderGL;
 
     procedure PushEvent;
     procedure ReceivedEvent(Sender: TObject);
 
-    procedure PushRenderEvent;
-    procedure ReceivedRenderEvent(Sender: TObject);
-
-    procedure SetRenderer(Value: TMPVPlayerRenderer);
+    procedure SetRenderMode(Value: TMPVPlayerRenderMode);
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -115,7 +101,6 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    procedure DoOnPaint; override;
 
     procedure mpv_command_(Args: Array of const);
     procedure mpv_set_option_string_(const AValue: String);
@@ -224,11 +209,9 @@ type
     property OnUnDock;
     property SmoothedElapse;
 
-    property OnDraw: TBGLRedrawEvent Read FOnGlDraw Write FOnGlDraw;
-
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
-    property RendererMode: TMPVPlayerRenderer read FRenderer write SetRenderer;
+    property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
     property OnEndFile: TMPVPlayerNotifyEvent read FOnEndFile write FOnEndFile;
@@ -248,7 +231,6 @@ implementation
 
 const
   LIBMPV_MAX_VOLUME = 100;
-  glFlip: Longint   = 1;
 
 // -----------------------------------------------------------------------------
 
@@ -259,23 +241,6 @@ const
 procedure LIBMPV_EVENT(Sender: Pointer); cdecl;
 begin
   if (Sender <> NIL) then TMPVPlayer(Sender).PushEvent;
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure LIBMPV_RENDER_EVENT(Sender: Pointer); cdecl;
-begin
-  if (Sender <> NIL) then TMPVPlayer(Sender).PushRenderEvent;
-end;
-
-// -----------------------------------------------------------------------------
-
-function get_proc_address_mpv(ctx: Pointer; Name: PChar): Pointer; cdecl;
-begin
-  Result := GetProcAddress(LibGL, Name);
-
-  if Result = NIL then
-    Result := wglGetProcAddress(Name);
 end;
 
 // -----------------------------------------------------------------------------
@@ -407,13 +372,11 @@ begin
   FVersion       := 0;
   FError         := 0;
   FInitialized   := False;
-  FGlInitialized := False;
   FMPVEvent      := NIL;
-  FOnGlDraw      := NIL;
   FState         := ssStop;
   FAutoStart     := True;
   FAutoLoadSub   := False;
-  FRenderer      := rmOpenGL;
+  FRenderMode    := rmOpenGL;
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
 
@@ -481,7 +444,7 @@ begin
   for i := 0 to FStartOptions.Count-1 do
     mpv_set_option_string_(FStartOptions[i]);
 
-  if FRenderer = rmEmbedding then
+  if FRenderMode = rmEmbedding then
   begin
     // Set our window handle (not necessary for OpenGl)
     {$IFDEF LINUX}
@@ -506,8 +469,8 @@ begin
   FMPVEvent.OnEvent := @ReceivedEvent;
   mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
 
-  if FRenderer = rmOpenGL then
-    InitializeGl;
+  if FRenderMode = rmOpenGL then
+    InitializeRenderGL;
 
   FInitialized := True;
   Result := True;
@@ -528,8 +491,8 @@ begin
     FMPVEvent := NIL;
   end;
 
-  if FRenderer = rmOpenGL then
-    UnInitializeGl;
+  if FRenderMode = rmOpenGL then
+    UnInitializeRenderGL;
 
   if Assigned(mpv_terminate_destroy) and Assigned(FMPV_HANDLE) then
     mpv_terminate_destroy(FMPV_HANDLE^);
@@ -541,118 +504,16 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.InitializeGl: Boolean;
+procedure TMPVPlayer.InitializeRenderGL;
 begin
-  Result := False;
-  FGlInitialized := False;
-
-  mpvOpenGLParams.get_proc_address := @get_proc_address_mpv;
-  mpvOpenGLParams.get_proc_address_ctx := NIL;
-
-  // Initialize params
-  SetLength(mpvRenderParams, 4);
-  mpvRenderParams[0]._type := MPV_RENDER_PARAM_API_TYPE;
-  mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_OPENGL);
-  mpvRenderParams[1]._type := MPV_RENDER_PARAM_OPENGL_INIT_PARAMS;
-  mpvRenderParams[1].Data  := @mpvOpenGLParams;
-  mpvRenderParams[2]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
-  mpvRenderParams[2].Data  := @glFlip;
-  mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
-  mpvRenderParams[3].Data  := NIL;
-
-  if not Load_libMPV_Render then
-  begin
-    FError := -1;
-    Exit;
-  end;
-
-  FError := mpv_render_context_create(mpvRenderContext, FMPV_HANDLE^, Pmpv_render_param(@mpvRenderParams[0]));
-  if FError <> 0 then Exit;
-
-  FGlEvent := TMPVPlayerThreadEvent.Create;
-  FGlEvent.OnEvent := @ReceivedRenderEvent;
-
-  mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Self);
-
-  // Update params
-  Update_mpvfbo;
-  SetLength(mpvUpdateParams, 3);
-  mpvUpdateParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
-  mpvUpdateParams[0].Data  := @mpvfbo;
-  mpvUpdateParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-  mpvUpdateParams[1].Data  := @glFlip;
-  mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
-  mpvUpdateParams[2].Data  := NIL;
-
-  FGlInitialized := True;
-  Result := FGlInitialized;
+  FRenderGL := TMPVPlayerRenderGL.Create(Self, FMPV_HANDLE);
 end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.UnInitializeGl: Boolean;
+procedure TMPVPlayer.UnInitializeRenderGL;
 begin
-  FGlInitialized := False;
-  Result := False;
-
-  mpv_render_context_set_update_callback(mpvRenderContext^, NIL, Self);
-
-  if Assigned(FGlEvent) then
-  begin
-    FGlEvent.Free;
-    FGlEvent := NIL;
-  end;
-
-  if Assigned(mpv_render_context_free) and  Assigned(mpvRenderContext) then
-    mpv_render_context_free(mpvRenderContext^);
-
-  SetLength(mpvUpdateParams, 0);
-  SetLength(mpvRenderParams, 0);
-  Free_libMPV_Render;
-
-  Result := True;
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayer.Update_mpvfbo;
-begin
-  mpvfbo.fbo := 0;
-  mpvfbo.w   := ClientWidth;
-  mpvfbo.h   := ClientHeight;
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayer.DoOnPaint;
-var
-  ctx: TBGLContext;
-begin
-  if FGlInitialized and (FState = ssPlay) then Exit;
-
-  ctx := PrepareBGLContext;
-
-  if Color = clNone then
-    BGLViewPort(ClientWidth, ClientHeight)
-  else
-  if Color = clDefault then
-    BGLViewPort(ClientWidth, ClientHeight, ColorToBGRA(clWindow))
-  else
-    BGLViewPort(ClientWidth, ClientHeight, ColorToBGRA(Color));
-
-  Update_mpvfbo;
-
-  if (FState <> ssPlay) and FGlInitialized then
-    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-
-  if Assigned(FOnGlDraw) then FOnGlDraw(Self, ctx);
-
-  SwapBuffers;
-
-  if FGlInitialized then
-    mpv_render_context_report_swap(mpvRenderContext^);
-
-  ReleaseBGLContext(ctx);
+  FRenderGL.Free;
 end;
 
 // -----------------------------------------------------------------------------
@@ -945,39 +806,10 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.PushRenderEvent;
+procedure TMPVPlayer.SetRenderMode(Value: TMPVPlayerRenderMode);
 begin
-  if Assigned(FGlEvent) then FGlEvent.PushEvent;
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayer.ReceivedRenderEvent(Sender: TObject);
-var
-  ctx : TBGLContext;
-begin
-  ctx := PrepareBGLContext;
-  BGLViewPort(ClientWidth, ClientHeight);
-
-  while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
-  begin
-    Update_mpvfbo;
-
-    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-    if Assigned(FOnGlDraw) then FOnGlDraw(Self, ctx);
-    SwapBuffers;
-    mpv_render_context_report_swap(mpvRenderContext^);
-  end;
-
-  ReleaseBGLContext(ctx);
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayer.SetRenderer(Value: TMPVPlayerRenderer);
-begin
-  if not Initialized and (FRenderer <> Value) then
-    FRenderer := Value;
+  if not Initialized and (FRenderMode <> Value) then
+    FRenderMode := Value;
 end;
 
 // -----------------------------------------------------------------------------
