@@ -49,8 +49,8 @@ type
     FOwner : TMPVPlayerThreadEvent;
     Event  : PRtlEvent;
     constructor Create(AOwner: TMPVPlayerThreadEvent);
-    procedure Execute; override;
     destructor Destroy; override;
+    procedure Execute; override;
   end;
 
   { TMPVPlayerThreadEvent }
