@@ -31,8 +31,8 @@ interface
 
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
-  LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
-  MPVPlayer.RenderGL, BGLVirtualScreen;
+  LResources, LazarusPackageIntf, OpenGLContext, libMPV.Client, MPVPlayer.Thread,
+  MPVPlayer.RenderGL;
 
 // -----------------------------------------------------------------------------
 
@@ -57,11 +57,12 @@ type
 
   { TMPVPlayer }
 
-  TMPVPlayer = class(TCustomBGLVirtualScreen)
+  TMPVPlayer = class(TCustomPanel)
   private
     FMPV_HANDLE   : Pmpv_handle;
     FError        : mpv_error;
     FVersion      : DWord;
+    FGL           : TOpenGLControl;
     FInitialized  : Boolean;
     FStartOptions : TStringList;
     FMPVEvent     : TMPVPlayerThreadEvent;
@@ -185,16 +186,12 @@ type
     property OnDblClick;
     property OnDragDrop;
     property OnDragOver;
-    property OnElapse;
     property OnEndDock;
     property OnEndDrag;
     property OnEnter;
     property OnExit;
-    property OnFramesPerSecond;
     property OnGetSiteInfo;
     property OnGetDockCaption;
-    property OnLoadTextures;
-    property OnUnloadTextures;
     property OnMouseDown;
     property OnMouseEnter;
     property OnMouseLeave;
@@ -207,7 +204,6 @@ type
     property OnStartDock;
     property OnStartDrag;
     property OnUnDock;
-    property SmoothedElapse;
 
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
@@ -365,9 +361,11 @@ begin
   ParentBackground := False;
   ParentColor      := False;
   Color            := clBlack;
+  FullRepaint      := False;
   Caption          := '';
 
   // our control setup
+  FGL            := NIL;
   FMPV_HANDLE    := NIL;
   FVersion       := 0;
   FError         := 0;
@@ -379,6 +377,8 @@ begin
   FRenderMode    := rmOpenGL;
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
+
+  FRenderGL   := NIL;
 
   {$IFDEF USETIMER}
   FTimer          := TTimer.Create(NIL);
@@ -506,7 +506,13 @@ end;
 
 procedure TMPVPlayer.InitializeRenderGL;
 begin
-  FRenderGL := TMPVPlayerRenderGL.Create(Self, FMPV_HANDLE);
+  FGL := TOpenGLControl.Create(Self);
+  FGL.Parent := Self;
+  FGL.Align := alClient;
+  //FGL.AutoResizeViewport := True;
+  //FGL.MultiSampling := 4;
+
+  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE);
 end;
 
 // -----------------------------------------------------------------------------
@@ -514,6 +520,10 @@ end;
 procedure TMPVPlayer.UnInitializeRenderGL;
 begin
   FRenderGL.Free;
+  FRenderGL := NIL;
+
+  FGL.Free;
+  FGL := NIL;
 end;
 
 // -----------------------------------------------------------------------------
