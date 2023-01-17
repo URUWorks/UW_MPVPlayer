@@ -29,7 +29,7 @@ interface
 
 uses
   Classes, SysUtils, libMPV.Client, libMPV.Render, libMPV.Render_gl, gl, glext,
-  BGLVirtualScreen;
+  OpenGLContext;
 
 // -----------------------------------------------------------------------------
 
@@ -41,7 +41,7 @@ type
 
   TMPVPlayerRenderThread = class(TThread)
   private
-    FVS              : TCustomBGLVirtualScreen;
+    FGL              : TOpenGLControl;
     FError           : mpv_error;
     mpvHandle        : Pmpv_handle;
     mpvRenderParams  : array of mpv_render_param;
@@ -49,19 +49,19 @@ type
     mpvOpenGLParams  : mpv_opengl_init_params;
     mpvRenderContext : pmpv_render_context;
     mpvfbo           : mpv_opengl_fbo;
+    function InitializeRenderContext: Boolean;
+    procedure UnInitializeRenderContext;
+    procedure Update_mpvfbo;
   protected
     procedure TerminatedSet; override;
   public
     Owner: TMPVPlayerRenderGL;
     Event: PRtlEvent;
     IsRenderActive: Boolean;
-    function InitializeRenderContext: Boolean;
-    procedure UnInitializeRenderContext;
-    procedure Update_mpvfbo;
-    constructor Create(AControl: TCustomBGLVirtualScreen; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL);
+    constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL);
     destructor Destroy; override;
     procedure Execute; override;
-    property VS: TCustomBGLVirtualScreen read FVS;
+    procedure RefreshContext;
   end;
 
   { TMPVPlayerRenderGL }
@@ -70,7 +70,7 @@ type
   private
     FThread: TMPVPlayerRenderThread;
   public
-    constructor Create(AControl: TCustomBGLVirtualScreen; AHandle: Pmpv_handle);
+    constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle);
     destructor Destroy; override;
     procedure Render;
   end;
@@ -110,7 +110,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderThread.Create(AControl: TCustomBGLVirtualScreen; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL);
+constructor TMPVPlayerRenderThread.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL);
 begin
   inherited Create(True);
 
@@ -118,8 +118,9 @@ begin
   Event     := RTLEventCreate;
   Owner     := AOwner;
   mpvHandle := AHandle;
-  FVS       := AControl;
-  FVS.ReleaseContext;
+  FGL       := AControl;
+  FGL.ReleaseContext;
+
   IsRenderActive  := False;
   mpvRenderParams := NIL;
   mpvUpdateParams := NIL;
@@ -160,9 +161,7 @@ begin
 
     while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) and not Terminated do
     begin
-      Update_mpvfbo;
-      mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-      if IsRenderActive then FVS.SwapBuffers;
+      RefreshContext;
       mpv_render_context_report_swap(mpvRenderContext^);
     end;
 
@@ -190,9 +189,9 @@ begin
   mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
   mpvRenderParams[3].Data  := NIL;
 
-  FVS.MakeCurrent();
+  FGL.MakeCurrent();
   FError := mpv_render_context_create(mpvRenderContext, mpvHandle^, Pmpv_render_param(@mpvRenderParams[0]));
-  if FError <> 0 then Exit;
+  if FError <> MPV_ERROR_SUCCESS then Exit;
 
   mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Owner);
 
@@ -231,8 +230,17 @@ procedure TMPVPlayerRenderThread.Update_mpvfbo;
 begin
   mpvfbo.internal_format := 0;
   mpvfbo.fbo := 0;
-  mpvfbo.w   := FVS.ClientWidth;
-  mpvfbo.h   := FVS.ClientHeight;
+  mpvfbo.w   := FGL.ClientWidth;
+  mpvfbo.h   := FGL.ClientHeight;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayerRenderThread.RefreshContext;
+begin
+  Update_mpvfbo;
+  mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
+  if IsRenderActive then FGL.SwapBuffers;
 end;
 
 // -----------------------------------------------------------------------------
@@ -241,7 +249,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderGL.Create(AControl: TCustomBGLVirtualScreen; AHandle: Pmpv_handle);
+constructor TMPVPlayerRenderGL.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle);
 begin
   FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self);
   if Load_libMPV_Render then FThread.Start;
