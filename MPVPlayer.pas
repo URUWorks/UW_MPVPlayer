@@ -41,7 +41,7 @@ type
   { TMPVPlayer Types }
 
   TMPVPlayerRenderMode  = (rmWindow, rmEmbedding, rmOpenGL);
-  TMPVPlayerSate        = (ssStop, ssPlay, ssPause, ssEnd);
+  TMPVPlayerSate        = (psStop, psPlay, psPause, psEnd);
   TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
 
@@ -84,6 +84,9 @@ type
     FOnSeek: TMPVPlayerNotifyEvent;        // Happens when a seek was initiated.
     FOnPlaybackRestart: TNotifyEvent;      // Usually happens on start of playback and after seeking.
     FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
+    FOnPlay: TNotifyEvent;                 // Play by user
+    FOnStop: TNotifyEvent;                 // Stop by user
+    FOnPause: TNotifyEvent;                // Pause by user
 
     function Initialize: Boolean;
     procedure UnInitialize;
@@ -119,6 +122,8 @@ type
     procedure Pause;
     procedure Resume;
     procedure Stop;
+    function IsPlaying: Boolean;
+    function IsPaused: Boolean;
     function GetMediaLenInMs: Integer;
     function GetMediaPosInMs: Integer;
     procedure SetMediaPosInMs(const AValue: Integer);
@@ -216,6 +221,10 @@ type
     property OnAudioReconfig: TNotifyEvent read FOnAudioReconfig write FOnAudioReconfig;
     property OnSeek: TMPVPlayerNotifyEvent read FOnSeek write FOnSeek;
     property OnPlaybackRestart: TNotifyEvent read FOnPlaybackRestart write FOnPlaybackRestart;
+
+    property OnPlay : TNotifyEvent read FOnPlay  write FOnPlay;
+    property OnStop : TNotifyEvent read FOnStop  write FOnStop;
+    property OnPause: TNotifyEvent read FOnPause write FOnPause;
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
   end;
 
@@ -371,7 +380,7 @@ begin
   FError         := 0;
   FInitialized   := False;
   FMPVEvent      := NIL;
-  FState         := ssStop;
+  FState         := psStop;
   FAutoStart     := True;
   FAutoLoadSub   := False;
   FRenderMode    := rmOpenGL;
@@ -564,15 +573,17 @@ end;
 
 procedure TMPVPlayer.Pause;
 begin
-  if FState = ssPlay then
+  if IsPlaying then
   begin
     mpv_set_property_boolean('pause', True);
-    FState := ssPause;
+    FState := psPause;
+    if Assigned(FOnPlay) then FOnPlay(Self);
   end
   else
   begin
     mpv_set_property_boolean('pause', False);
-    FState := ssPlay;
+    FState := psPlay;
+    if Assigned(FOnPause) then FOnPause(Self);
   end;
 end;
 
@@ -580,10 +591,10 @@ end;
 
 procedure TMPVPlayer.Resume;
 begin
-  if FState = ssPause then
+  if IsPaused then
   begin
     mpv_set_property_boolean('pause', False);
-    FState := ssPlay;
+    FState := psPlay;
   end;
 end;
 
@@ -591,12 +602,27 @@ end;
 
 procedure TMPVPlayer.Stop;
 begin
-  if FState <> ssStop then
+  if FState <> psStop then
   begin
     mpv_set_property_boolean('pause', True);
     SetMediaPosInMs(0);
-    FState := ssStop;
+    FState := psStop;
+    if Assigned(FOnStop) then FOnStop(Self);
   end;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.IsPlaying: Boolean;
+begin
+  Result := (FState = psPlay);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.IsPaused: Boolean;
+begin
+  Result := (FState = psPause);
 end;
 
 // -----------------------------------------------------------------------------
@@ -775,9 +801,9 @@ begin
       MPV_EVENT_FILE_LOADED:
       begin
         if FAutoStart then
-          FState := ssPlay
+          FState := psPlay
         else
-          FState := ssPause;
+          FState := psPause;
         {$IFDEF USETIMER}
         FTimer.Enabled := True;
         {$ENDIF}
@@ -789,7 +815,7 @@ begin
 
       MPV_EVENT_END_FILE:
       begin
-        FState := ssEnd;
+        FState := psEnd;
         {$IFDEF USETIMER}
         FTimer.Enabled := False;
         {$ENDIF}
