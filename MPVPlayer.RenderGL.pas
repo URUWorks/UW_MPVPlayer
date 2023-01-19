@@ -161,8 +161,8 @@ begin
 
     while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) and not Terminated do
     begin
-      RefreshContext;
       mpv_render_context_report_swap(mpvRenderContext^);
+      RefreshContext;
     end;
 
     RTLEventResetEvent(Event);
