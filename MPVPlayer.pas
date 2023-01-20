@@ -112,7 +112,8 @@ type
     procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
     function mpv_get_property_double(const AProperty: String): Double;
     procedure mpv_set_property_double(const AProperty: String; const AValue: Double);
-    procedure mpv_set_property_int64(const AProperty: String; const AValue: Double);
+    function mpv_get_property_int64(const AProperty: String): Int64;
+    procedure mpv_set_property_int64(const AProperty: String; const AValue: Int64);
 
     function GetErrorString: String;
     function GetVersionString: String;
@@ -136,6 +137,11 @@ type
     procedure SetMediaTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
     procedure SetMediaTrack(const Index: Integer); overload;
     procedure GetMediaTracks;
+    procedure ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
+    procedure SetTextColor(const AValue: String);
+    procedure SetTextHAlign(const AValue: String);
+    procedure SetTextVAlign(const AValue: String);
+    procedure SetTextSize(const AValue: Int64);
 
     property mpv_handle    : Pmpv_handle         read FMPV_HANDLE;
     property Error         : mpv_error           read FError;
@@ -259,7 +265,7 @@ var
   pArgs: array of PChar;
   i: Integer;
 begin
-  if Initialized and (High(Args) > 0) then
+  if FInitialized and (High(Args) > 0) then
   begin
     SetLength(pArgs, High(Args)+1);
 
@@ -304,7 +310,7 @@ var
   p: Integer;
 begin
   Result := False;
-  if not Initialized then Exit;
+  if not FInitialized then Exit;
   FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_FLAG, @p);
   Result := Boolean(p);
 end;
@@ -315,7 +321,7 @@ procedure TMPVPlayer.mpv_set_property_boolean(const APropertyName: String; const
 var
   p: Integer;
 begin
-  if not Initialized then Exit;
+  if not FInitialized then Exit;
 
   if AValue then
     p := 1
@@ -329,7 +335,7 @@ end;
 
 function TMPVPlayer.mpv_get_property_double(const AProperty: String): Double;
 begin
-  if Initialized then
+  if FInitialized then
     FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @Result)
   else
     Result := 0;
@@ -339,15 +345,25 @@ end;
 
 procedure TMPVPlayer.mpv_set_property_double(const AProperty: String; const AValue: Double);
 begin
-  if Initialized then
+  if FInitialized then
     FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_property_int64(const AProperty: String; const AValue: Double);
+function TMPVPlayer.mpv_get_property_int64(const AProperty: String): Int64;
 begin
-  if Initialized then
+  if FInitialized then
+    FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @Result)
+  else
+    Result := 0;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.mpv_set_property_int64(const AProperty: String; const AValue: Int64);
+begin
+  if FInitialized then
     FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @AValue);
 end;
 
@@ -489,7 +505,7 @@ end;
 
 procedure TMPVPlayer.UnInitialize;
 begin
-  if not Initialized then Exit;
+  if not FInitialized then Exit;
 
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
@@ -563,7 +579,7 @@ end;
 
 procedure TMPVPlayer.Play(const AFileName: String);
 begin
-  if not Initialized then
+  if not FInitialized then
     Initialize;
 
   mpv_command_(['loadfile', AFileName]);
@@ -773,6 +789,47 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVPlayer.ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
+begin
+  if Duration = 0 then
+    Duration := mpv_get_property_int64('osd-duration');
+
+  if FontSize = 0 then
+    FontSize := mpv_get_property_int64('osd-font-size');
+
+  mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + AText]);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetTextColor(const AValue: String);
+begin
+  mpv_set_option_string_('osd-color='+AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetTextVAlign(const AValue: String);
+begin
+  mpv_set_option_string_('osd-align-y='+AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetTextHAlign(const AValue: String);
+begin
+  mpv_set_option_string_('osd-align-x='+AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetTextSize(const AValue: Int64);
+begin
+  mpv_set_property_int64('osd-font-size', AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVPlayer.PushEvent;
 begin
   if Assigned(FMPVEvent) then FMPVEvent.PushEvent;
@@ -844,7 +901,7 @@ end;
 
 procedure TMPVPlayer.SetRenderMode(Value: TMPVPlayerRenderMode);
 begin
-  if not Initialized and (FRenderMode <> Value) then
+  if not FInitialized and (FRenderMode <> Value) then
     FRenderMode := Value;
 end;
 
