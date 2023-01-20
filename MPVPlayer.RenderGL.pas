@@ -58,6 +58,7 @@ type
     Owner: TMPVPlayerRenderGL;
     Event: PRtlEvent;
     IsRenderActive: Boolean;
+    ForceUpdateContext: Boolean;
     constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL);
     destructor Destroy; override;
     procedure Execute; override;
@@ -73,6 +74,7 @@ type
     constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle);
     destructor Destroy; override;
     procedure Render;
+    procedure ForceRender;
   end;
 
 // -----------------------------------------------------------------------------
@@ -121,9 +123,10 @@ begin
   FGL       := AControl;
   FGL.ReleaseContext;
 
-  IsRenderActive  := False;
-  mpvRenderParams := NIL;
-  mpvUpdateParams := NIL;
+  IsRenderActive     := False;
+  ForceUpdateContext := False;
+  mpvRenderParams    := NIL;
+  mpvUpdateParams    := NIL;
 end;
 
 // -----------------------------------------------------------------------------
@@ -141,6 +144,7 @@ end;
 procedure TMPVPlayerRenderThread.TerminatedSet;
 begin
   IsRenderActive := False;
+  ForceUpdateContext := False;
   if Assigned(Event) then RTLEventSetEvent(Event);
   inherited TerminatedSet;
 end;
@@ -159,11 +163,17 @@ begin
   begin
     RTLEventWaitFor(Event);
 
-    while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) and not Terminated do
+    if ForceUpdateContext then
     begin
-      mpv_render_context_report_swap(mpvRenderContext^);
+      ForceUpdateContext := False;
       RefreshContext;
-    end;
+    end
+    else
+      while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) and not Terminated do
+      begin
+        mpv_render_context_report_swap(mpvRenderContext^);
+        RefreshContext;
+      end;
 
     RTLEventResetEvent(Event);
   end;
@@ -271,6 +281,17 @@ procedure TMPVPlayerRenderGL.Render;
 begin
   if Assigned(FThread) and (FThread.IsRenderActive) then
     RTLEventSetEvent(FThread.Event);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayerRenderGL.ForceRender;
+begin
+  if Assigned(FThread) and (FThread.IsRenderActive) then
+  begin
+    FThread.ForceUpdateContext := True;
+    RTLEventSetEvent(FThread.Event);
+  end;
 end;
 
 // -----------------------------------------------------------------------------

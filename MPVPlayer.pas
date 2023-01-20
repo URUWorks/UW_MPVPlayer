@@ -102,6 +102,8 @@ type
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
     {$ENDIF}
+
+    procedure DoResize(Sender: TObject);
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -531,11 +533,10 @@ end;
 
 procedure TMPVPlayer.InitializeRenderGL;
 begin
-  FGL := TOpenGLControl.Create(Self);
-  FGL.Parent := Self;
-  FGL.Align := alClient;
-  //FGL.AutoResizeViewport := True;
-  //FGL.MultiSampling := 4;
+  FGL          := TOpenGLControl.Create(Self);
+  FGL.Parent   := Self;
+  FGL.Align    := alClient;
+  FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
   FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE);
 end;
@@ -913,6 +914,14 @@ begin
   if Assigned(OnTimeChanged) then OnTimeChanged(Sender, GetMediaPosInMs);
 end;
 {$ENDIF}
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.DoResize(Sender: TObject);
+begin
+  if Assigned(FRenderGL) and not IsPlaying then
+    FRenderGL.ForceRender;
+end;
 
 // -----------------------------------------------------------------------------
 
