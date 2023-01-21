@@ -1,0 +1,115 @@
+object Form1: TForm1
+  Left = 237
+  Height = 402
+  Top = 125
+  Width = 496
+  Caption = 'MPVPlayer Demo'
+  ClientHeight = 402
+  ClientWidth = 496
+  Constraints.MinHeight = 240
+  Constraints.MinWidth = 320
+  DefaultMonitor = dmMainForm
+  LCLVersion = '2.2.4.0'
+  object Button1: TButton
+    Left = 336
+    Height = 25
+    Top = 7
+    Width = 75
+    Anchors = [akTop, akRight]
+    Caption = 'load'
+    OnClick = Button1Click
+    TabOrder = 0
+  end
+  object Button2: TButton
+    Left = 336
+    Height = 25
+    Top = 39
+    Width = 75
+    Anchors = [akTop, akRight]
+    Caption = 'pause'
+    OnClick = Button2Click
+    TabOrder = 1
+  end
+  object Button3: TButton
+    Left = 336
+    Height = 25
+    Top = 71
+    Width = 75
+    Anchors = [akTop, akRight]
+    Caption = 'stop'
+    OnClick = Button3Click
+    TabOrder = 2
+  end
+  object Button4: TButton
+    Left = 336
+    Height = 25
+    Top = 103
+    Width = 75
+    Anchors = [akTop, akRight]
+    Caption = 'show text'
+    OnClick = Button4Click
+    TabOrder = 3
+  end
+  object Memo1: TMemo
+    Left = 8
+    Height = 112
+    Top = 280
+    Width = 320
+    Anchors = [akLeft, akRight, akBottom]
+    TabOrder = 4
+  end
+  object mpv: TMPVPlayer
+    Left = 8
+    Height = 216
+    Top = 8
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    BevelOuter = bvNone
+    BevelWidth = 0
+    ParentColor = False
+    TabOrder = 5
+    UseDockManager = False
+    AutoStartPlayback = True
+    AutoLoadSubtitle = False
+    RendererMode = rmOpenGL
+    OnFileLoaded = mpvFileLoaded
+    OnTimeChanged = mpvTimeChanged
+  end
+  object TrackBar1: TTrackBar
+    Left = 8
+    Height = 25
+    Top = 224
+    Width = 320
+    LineSize = 0
+    Position = 0
+    ShowSelRange = False
+    TickMarks = tmBoth
+    TickStyle = tsNone
+    Anchors = [akLeft, akRight, akBottom]
+    TabOrder = 6
+  end
+  object Label1: TLabel
+    Left = 8
+    Height = 15
+    Top = 256
+    Width = 112
+    Anchors = [akLeft, akBottom]
+    AutoSize = False
+    Caption = '0'
+    ParentColor = False
+  end
+  object Label2: TLabel
+    Left = 216
+    Height = 15
+    Top = 256
+    Width = 112
+    Alignment = taRightJustify
+    Anchors = [akRight, akBottom]
+    AutoSize = False
+    Caption = '0'
+    ParentColor = False
+  end
+  object od: TOpenDialog
+    Left = 288
+    Top = 16
+  end
+end
