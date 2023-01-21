@@ -58,11 +58,11 @@ type
     Owner: TMPVPlayerRenderGL;
     Event: PRtlEvent;
     IsRenderActive: Boolean;
-    ForceUpdateContext: Boolean;
+    ForceInvalidateContext: Boolean;
     constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL);
     destructor Destroy; override;
     procedure Execute; override;
-    procedure RefreshContext;
+    procedure InvalidateContext;
   end;
 
   { TMPVPlayerRenderGL }
@@ -73,8 +73,7 @@ type
   public
     constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle);
     destructor Destroy; override;
-    procedure Render;
-    procedure ForceRender;
+    procedure Render(const ForceInvalidate: Boolean = False);
   end;
 
 // -----------------------------------------------------------------------------
@@ -123,10 +122,10 @@ begin
   FGL       := AControl;
   FGL.ReleaseContext;
 
-  IsRenderActive     := False;
-  ForceUpdateContext := False;
-  mpvRenderParams    := NIL;
-  mpvUpdateParams    := NIL;
+  IsRenderActive         := False;
+  ForceInvalidateContext := False;
+  mpvRenderParams        := NIL;
+  mpvUpdateParams        := NIL;
 end;
 
 // -----------------------------------------------------------------------------
@@ -144,7 +143,7 @@ end;
 procedure TMPVPlayerRenderThread.TerminatedSet;
 begin
   IsRenderActive := False;
-  ForceUpdateContext := False;
+  ForceInvalidateContext := False;
   if Assigned(Event) then RTLEventSetEvent(Event);
   inherited TerminatedSet;
 end;
@@ -163,16 +162,16 @@ begin
   begin
     RTLEventWaitFor(Event);
 
-    if ForceUpdateContext then
+    if ForceInvalidateContext then
     begin
-      ForceUpdateContext := False;
-      RefreshContext;
+      ForceInvalidateContext := False;
+      InvalidateContext;
     end
     else
-      while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) and not Terminated do
+      while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
       begin
         mpv_render_context_report_swap(mpvRenderContext^);
-        RefreshContext;
+        InvalidateContext;
       end;
 
     RTLEventResetEvent(Event);
@@ -246,11 +245,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayerRenderThread.RefreshContext;
+procedure TMPVPlayerRenderThread.InvalidateContext;
 begin
   Update_mpvfbo;
-  mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-  if IsRenderActive then FGL.SwapBuffers;
+  if not Terminated then
+  begin
+    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
+    if IsRenderActive then FGL.SwapBuffers;
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -277,19 +279,11 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayerRenderGL.Render;
-begin
-  if Assigned(FThread) and (FThread.IsRenderActive) then
-    RTLEventSetEvent(FThread.Event);
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayerRenderGL.ForceRender;
+procedure TMPVPlayerRenderGL.Render(const ForceInvalidate: Boolean = False);
 begin
   if Assigned(FThread) and (FThread.IsRenderActive) then
   begin
-    FThread.ForceUpdateContext := True;
+    FThread.ForceInvalidateContext := ForceInvalidate;
     RTLEventSetEvent(FThread.Event);
   end;
 end;
