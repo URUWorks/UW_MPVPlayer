@@ -139,6 +139,8 @@ type
     procedure SetMediaTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
     procedure SetMediaTrack(const Index: Integer); overload;
     procedure GetMediaTracks;
+    procedure LoadSubtitle(const AFileName: String);
+    procedure LoadAudio(const AFileName: String);
     procedure ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
@@ -790,8 +792,24 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVPlayer.LoadSubtitle(const AFileName: String);
+begin
+  mpv_command_(['sub-add', AFileName]);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.LoadAudio(const AFileName: String);
+begin
+  mpv_command_(['audio-add', AFileName]);
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVPlayer.ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
 begin
+  if AText.IsEmpty then Exit;
+
   if Duration = 0 then
     Duration := mpv_get_property_int64('osd-duration');
 
