@@ -920,7 +920,7 @@ end;
 procedure TMPVPlayer.DoResize(Sender: TObject);
 begin
   if Assigned(FRenderGL) and not IsPlaying then
-    FRenderGL.ForceRender;
+    FRenderGL.Render(True);
 end;
 
 // -----------------------------------------------------------------------------
