@@ -32,7 +32,8 @@ interface
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
   LResources, LazarusPackageIntf, OpenGLContext, libMPV.Client, MPVPlayer.Thread,
-  MPVPlayer.RenderGL;
+  MPVPlayer.RenderGL
+  {$IFDEF BGLCONTROLS}, BGLVirtualScreen{$ENDIF};
 
 // -----------------------------------------------------------------------------
 
@@ -62,7 +63,7 @@ type
     FMPV_HANDLE   : Pmpv_handle;
     FError        : mpv_error;
     FVersion      : DWord;
-    FGL           : TOpenGLControl;
+    FGL           : {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF};
     FInitialized  : Boolean;
     FStartOptions : TStringList;
     FMPVEvent     : TMPVPlayerThreadEvent;
@@ -87,6 +88,10 @@ type
     FOnPlay: TNotifyEvent;                 // Play by user
     FOnStop: TNotifyEvent;                 // Stop by user
     FOnPause: TNotifyEvent;                // Pause by user
+
+    {$IFDEF BGLCONTROLS}
+    FBeforeSwapBuffers: TBGLUseContextCallback;
+    {$ENDIF}
 
     function Initialize: Boolean;
     procedure UnInitialize;
@@ -236,6 +241,10 @@ type
     property OnStop : TNotifyEvent read FOnStop  write FOnStop;
     property OnPause: TNotifyEvent read FOnPause write FOnPause;
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
+
+    {$IFDEF BGLCONTROLS}
+    property OnBeforeSwapBuffers: TBGLUseContextCallback read FBeforeSwapBuffers write FBeforeSwapBuffers;
+    {$ENDIF}
   end;
 
 procedure Register;
@@ -535,12 +544,12 @@ end;
 
 procedure TMPVPlayer.InitializeRenderGL;
 begin
-  FGL          := TOpenGLControl.Create(Self);
+  FGL          := {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}.Create(Self);
   FGL.Parent   := Self;
   FGL.Align    := alClient;
   FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
-  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE);
+  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FBeforeSwapBuffers{$ENDIF});
 end;
 
 // -----------------------------------------------------------------------------
