@@ -38,6 +38,10 @@ uses
 
 type
 
+  {$IFDEF BGLCONTROLS}
+  TMPVPlayerDrawEvent = procedure (Sender: TObject; ABGLCanvas: TBGLCustomCanvas) of object;
+  {$ENDIF}
+
   TMPVPlayerRenderGL = class;
 
   { TMPVPlayerRenderThread }
@@ -63,9 +67,9 @@ type
     IsRenderActive: Boolean;
     ForceInvalidateContext: Boolean;
     {$IFDEF BGLCONTROLS}
-    FUseContextCallback: TBGLUseContextCallback;
+    FDrawCallback: TMPVPlayerDrawEvent;
     {$ENDIF}
-    constructor Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; AUseContextCallback: TBGLUseContextCallback = NIL{$ENDIF});
+    constructor Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Execute; override;
     procedure InvalidateContext;
@@ -77,7 +81,7 @@ type
   private
     FThread: TMPVPlayerRenderThread;
   public
-    constructor Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; AUseContextCallback: TBGLUseContextCallback = NIL{$ENDIF});
+    constructor Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Render(const ForceInvalidate: Boolean = False);
   end;
@@ -117,7 +121,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderThread.Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; AUseContextCallback: TBGLUseContextCallback = NIL{$ENDIF});
+constructor TMPVPlayerRenderThread.Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
   inherited Create(True);
 
@@ -125,7 +129,9 @@ begin
   Event     := RTLEventCreate;
   Owner     := AOwner;
   mpvHandle := AHandle;
-  FUseContextCallback := AUseContextCallback;
+  {$IFDEF BGLCONTROLS}
+  FDrawCallback := ADrawCallback;
+  {$ENDIF}
   FGL := AControl;
   FGL.ReleaseContext;
 
@@ -254,8 +260,6 @@ end;
 
 procedure TMPVPlayerRenderThread.InvalidateContext;
 {$IFDEF BGLCONTROLS}
-var
-  ctx: TBGLContext;
 {$ENDIF}
 begin
   Update_mpvfbo;
@@ -264,12 +268,10 @@ begin
     FGL.MakeCurrent();
     mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
     {$IFDEF BGLCONTROLS}
-    if Assigned(FUseContextCallback) then
+    if Assigned(FDrawCallback) then
     begin
-      ctx.Canvas := BGLCanvas;
       BGLViewPort(FGL.ClientWidth, FGL.ClientHeight);
-      FUseContextCallback(Self, ctx, NIL);
-      ctx.Canvas := NIL;
+      FDrawCallback(Self, BGLCanvas);
     end;
     {$ENDIF}
     if IsRenderActive then FGL.SwapBuffers;
@@ -282,9 +284,9 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderGL.Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; AUseContextCallback: TBGLUseContextCallback = NIL{$ENDIF});
+constructor TMPVPlayerRenderGL.Create(AControl: {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
-  FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self, AUseContextCallback);
+  FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self {$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
   if Load_libMPV_Render then FThread.Start;
 end;
 

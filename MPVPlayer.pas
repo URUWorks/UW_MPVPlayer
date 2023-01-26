@@ -31,9 +31,9 @@ interface
 
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
-  LResources, LazarusPackageIntf, OpenGLContext, libMPV.Client, MPVPlayer.Thread,
+  LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
   MPVPlayer.RenderGL
-  {$IFDEF BGLCONTROLS}, BGLVirtualScreen{$ENDIF};
+  {$IFDEF BGLCONTROLS}, BGRAOpenGL, BGLVirtualScreen{$ELSE}, OpenGLContext{$ENDIF};
 
 // -----------------------------------------------------------------------------
 
@@ -90,7 +90,7 @@ type
     FOnPause: TNotifyEvent;                // Pause by user
 
     {$IFDEF BGLCONTROLS}
-    FBeforeSwapBuffers: TBGLUseContextCallback;
+    FOnDrawEvent: TMPVPlayerDrawEvent;
     {$ENDIF}
 
     function Initialize: Boolean;
@@ -243,7 +243,7 @@ type
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
 
     {$IFDEF BGLCONTROLS}
-    property OnBeforeSwapBuffers: TBGLUseContextCallback read FBeforeSwapBuffers write FBeforeSwapBuffers;
+    property OnDraw: TMPVPlayerDrawEvent read FOnDrawEvent write FOnDrawEvent;
     {$ENDIF}
   end;
 
@@ -549,7 +549,7 @@ begin
   FGL.Align    := alClient;
   FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
-  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FBeforeSwapBuffers{$ENDIF});
+  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
 end;
 
 // -----------------------------------------------------------------------------
