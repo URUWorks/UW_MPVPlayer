@@ -71,6 +71,7 @@ type
     FTrackList    : TMPVPlayerTrackList;
     FAutoStart    : Boolean;
     FAutoLoadSub  : Boolean;
+    FFileName     : String;
     {$IFDEF USETIMER}
     FTimer        : TTimer;
     {$ENDIF}
@@ -160,6 +161,7 @@ type
     property Initialized   : Boolean             read FInitialized;
     property StartOptions  : TStringList         read FStartOptions;
     property TrackList     : TMPVPlayerTrackList read FTrackList;
+    property FileName      : String              read FFileName;
 
     {$IFDEF USETIMER}
     property Timer         : TTimer read FTimer;
@@ -412,6 +414,7 @@ begin
   FState         := psStop;
   FAutoStart     := True;
   FAutoLoadSub   := False;
+  FFileName      := '';
   FRenderMode    := rmOpenGL;
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
@@ -537,6 +540,7 @@ begin
 
   FMPV_HANDLE := NIL;
   SetLength(FTrackList, 0);
+  FFileName := '';
   FInitialized := False;
 end;
 
@@ -547,6 +551,7 @@ begin
   FGL          := {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}.Create(Self);
   FGL.Parent   := Self;
   FGL.Align    := alClient;
+  FGL.OnClick  := OnClick;
   FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
   FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
@@ -594,7 +599,8 @@ begin
   if not FInitialized then
     Initialize;
 
-  mpv_command_(['loadfile', AFileName]);
+  FFileName := AFileName;
+  mpv_command_(['loadfile', FFileName]);
 end;
 
 // -----------------------------------------------------------------------------
