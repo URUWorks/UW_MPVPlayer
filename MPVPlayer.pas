@@ -32,8 +32,8 @@ interface
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
   LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
-  MPVPlayer.RenderGL
-  {$IFDEF BGLCONTROLS}, BGRAOpenGL, BGLVirtualScreen{$ELSE}, OpenGLContext{$ENDIF};
+  MPVPlayer.RenderGL, OpenGLContext
+  {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF};
 
 // -----------------------------------------------------------------------------
 
@@ -50,6 +50,7 @@ type
     Kind     : TMPVPlayerTrackType;
     ID       : Integer;
     Codec    : String;
+    Title    : String;
     Lang     : String;
     Selected : Boolean;
   end;
@@ -63,7 +64,7 @@ type
     FMPV_HANDLE   : Pmpv_handle;
     FError        : mpv_error;
     FVersion      : DWord;
-    FGL           : {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF};
+    FGL           : TOpenGLControl;
     FInitialized  : Boolean;
     FStartOptions : TStringList;
     FMPVEvent     : TMPVPlayerThreadEvent;
@@ -71,6 +72,7 @@ type
     FTrackList    : TMPVPlayerTrackList;
     FAutoStart    : Boolean;
     FAutoLoadSub  : Boolean;
+    FStartAtPosMs : Integer;
     FFileName     : String;
     {$IFDEF USETIMER}
     FTimer        : TTimer;
@@ -127,7 +129,7 @@ type
     function GetVersionString: String;
     function GetPlayerHandle: Pmpv_handle;
 
-    procedure Play(const AFileName: String);
+    procedure Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
     procedure Pause;
     procedure Resume;
     procedure Stop;
@@ -548,7 +550,7 @@ end;
 
 procedure TMPVPlayer.InitializeRenderGL;
 begin
-  FGL          := {$IFDEF BGLCONTROLS}TCustomBGLVirtualScreen{$ELSE}TOpenGLControl{$ENDIF}.Create(Self);
+  FGL          := TOpenGLControl.Create(Self);
   FGL.Parent   := Self;
   FGL.Align    := alClient;
   FGL.OnClick  := OnClick;
@@ -594,11 +596,12 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.Play(const AFileName: String);
+procedure TMPVPlayer.Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
 begin
   if not FInitialized then
     Initialize;
 
+  FStartAtPosMs := AStartAtPositionMs;
   FFileName := AFileName;
   mpv_command_(['loadfile', FFileName]);
 end;
@@ -752,10 +755,10 @@ end;
 
 procedure TMPVPlayer.GetMediaTracks;
 var
-  Node, Map, Detail: mpv_node;
   i, j: integer;
-  pc: PPChar;
-  Value, Value2: String;
+  Node, Map, Detail: mpv_node;
+  Keys: PPChar;
+  Key, Value: String;
 begin
   FError := mpv_get_property(FMPV_HANDLE^, 'track-list', MPV_FORMAT_NODE, @Node);
   if FError = MPV_ERROR_SUCCESS then
@@ -764,39 +767,39 @@ begin
       SetLength(FTrackList, Node.u.list^.num);
       for i := 0 to Node.u.list^.num -1 do
       begin
-        map := Node.u.list^.values^[i];
-        pc  := map.u.list^.keys;
+        map  := Node.u.list^.values^[i];
+        Keys := map.u.list^.keys;
         FillByte(FTrackList[i], SizeOf(TMPVPlayerTrackInfo), 0);
 
         for j := 0 to map.u.list^.num -1 do
         begin
           Detail := map.u.list^.values^[j];
-          Value  := StrPas(pc^);
-          if Value = 'id' then
-            FTrackList[i].Id := Detail.u.int64_;
+          Key    := StrPas(Keys^);
 
-          if Value = 'type' then
+          if Key = 'id' then
+            FTrackList[i].Id := Detail.u.int64_
+          else if Key = 'type' then
           begin
-            Value2 := Detail.u._string;
-            if Value2 = 'audio' then
+            Value := StrPas(Detail.u._string);
+            if Value = 'audio' then
               FTrackList[i].Kind := ttAudio
-            else if Value2 = 'video' then
+            else if Value = 'video' then
               FTrackList[i].Kind := ttVideo
-            else if Value2 = 'sub' then
+            else if Value = 'sub' then
               FTrackList[i].Kind := ttSubtitle
             else
               FTrackList[i].Kind := ttUnknown;
-          end;
-
-          if Value = 'lang' then
-            FTrackList[i].Lang := StrPas(Detail.u._string);
-
-          if Value = 'codec' then
-            FTrackList[i].Codec := StrPas(Detail.u._string);
-          if Value = 'selected' then
+          end
+          else if Key = 'title' then
+            FTrackList[i].title := StrPas(Detail.u._string)
+          else if Key = 'lang' then
+            FTrackList[i].Lang := StrPas(Detail.u._string)
+          else if Key = 'codec' then
+            FTrackList[i].Codec := StrPas(Detail.u._string)
+          else if Key = 'selected' then
             FTrackList[i].Selected := Detail.u.flag = 1;
 
-          Inc(pc);
+          Inc(Keys);
         end;
       end;
     except
@@ -898,6 +901,13 @@ begin
         {$IFDEF USETIMER}
         FTimer.Enabled := True;
         {$ENDIF}
+
+        if (FStartAtPosMs > 0) then
+        begin
+          SetMediaPosInMs(FStartAtPosMs);
+          FStartAtPosMs := 0;
+        end;
+
         if Assigned(OnFileLoaded) then OnFileLoaded(Sender);
       end;
 
