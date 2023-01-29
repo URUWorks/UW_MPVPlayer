@@ -2066,6 +2066,8 @@ function libmpv_GetInstallPath: String;
 procedure Free_libMPV;
 function Load_libMPV: Integer;
 
+function IsLibMPVAvailable: Boolean;
+
 // -----------------------------------------------------------------------------
 
 implementation
@@ -2305,6 +2307,38 @@ begin
   end;
 
   Result := MPV_ERROR_SUCCESS;
+end;
+
+// -----------------------------------------------------------------------------
+
+function IsLibMPVAvailable: Boolean;
+var
+  FHandle: Pmpv_handle;
+begin
+  Result := False;
+
+  if hLib <> 0 then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if Load_libMPV = MPV_ERROR_SUCCESS then
+    try
+      FHandle := mpv_create();
+      if not Assigned(FHandle) then
+        Exit;
+
+      if mpv_initialize(FHandle^) <> MPV_ERROR_SUCCESS then
+        Exit;
+
+      mpv_terminate_destroy(FHandle^);
+
+      Result := True;
+    finally
+      FHandle := NIL;
+      Free_libMPV;
+    end;
 end;
 
 // -----------------------------------------------------------------------------
