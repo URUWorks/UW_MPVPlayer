@@ -506,6 +506,12 @@ begin
   {$ENDIF}
 
   FError := mpv_initialize(FMPV_HANDLE^);
+  if FError <> MPV_ERROR_SUCCESS then
+  begin
+    Free_libMPV;
+    Exit;
+  end;
+
   FError := mpv_request_log_messages(FMPV_HANDLE^, 'no');
 
   FMPVEvent := TMPVPlayerThreadEvent.Create;
