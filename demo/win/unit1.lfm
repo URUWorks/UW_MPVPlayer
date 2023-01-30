@@ -71,8 +71,10 @@ object Form1: TForm1
     AutoStartPlayback = True
     AutoLoadSubtitle = False
     RendererMode = rmOpenGL
+    OnStartFile = mpvStartFile
     OnFileLoaded = mpvFileLoaded
     OnTimeChanged = mpvTimeChanged
+    OnDraw = mpvDraw
   end
   object TrackBar1: TTrackBar
     Left = 8

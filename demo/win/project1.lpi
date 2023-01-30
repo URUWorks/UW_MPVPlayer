@@ -26,6 +26,9 @@
     </RunParams>
     <RequiredPackages>
       <Item>
+        <PackageName Value="BGLControls"/>
+      </Item>
+      <Item>
         <PackageName Value="UWMPVPlayer"/>
       </Item>
       <Item>

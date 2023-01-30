@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  ComCtrls, MPVPlayer;
+  ComCtrls, MPVPlayer, BGRAOpenGL, BGRABitmapTypes;
 
 type
 
@@ -27,7 +27,9 @@ type
     procedure Button2Click(Sender: TObject);
     procedure Button3Click(Sender: TObject);
     procedure Button4Click(Sender: TObject);
+    procedure mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
     procedure mpvFileLoaded(Sender: TObject);
+    procedure mpvStartFile(Sender: TObject);
     procedure mpvTimeChanged(ASender: TObject; AParam: Integer);
   private
 
@@ -48,7 +50,6 @@ procedure TForm1.Button1Click(Sender: TObject);
 begin
   od.Execute;
 
-  //mpv.RendererMode := rmWindow;
   mpv.Play(od.FileName);
 
   if mpv.Error <> 0 then
@@ -70,10 +71,29 @@ begin
   mpv.ShowText(Caption);
 end;
 
+procedure TForm1.mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
+var
+  fnt: IBGLRenderedFont;
+begin
+  fnt := BGLFont('Arial', 20, CSSLightYellow,CSSBlack, [fsBold]);
+  fnt.TextOut(ABGLCanvas.Width div 2, ABGLCanvas.Height div 2, 'BGRABitmap is amazing!', taCenter, tlCenter);
+end;
+
 procedure TForm1.mpvFileLoaded(Sender: TObject);
 begin
   TrackBar1.Max := mpv.GetMediaLenInMs;
   Label2.Caption := inttostr(TrackBar1.Max) + 'ms';
+
+  Memo1.Lines.Add('File loaded!');
+  Memo1.Lines.Add('Video Width: ' + IntToStr(mpv.GetVideoWidth));
+  Memo1.Lines.Add('Video Height: ' + IntToStr(mpv.GetVideoHeight));
+  Memo1.Lines.Add('Video Total Frames: ' + IntToStr(mpv.GetVideoTotalFrames));
+  Memo1.Lines.Add('Video FPS: ' + FloatToStr(mpv.GetVideoFPS));
+end;
+
+procedure TForm1.mpvStartFile(Sender: TObject);
+begin
+  Memo1.Lines.Add('reading file');
 end;
 
 procedure TForm1.mpvTimeChanged(ASender: TObject; AParam: Integer);
