@@ -155,6 +155,11 @@ type
     procedure SetTextVAlign(const AValue: String);
     procedure SetTextSize(const AValue: Int64);
 
+    function GetVideoWidth: Integer;
+    function GetVideoHeight: Integer;
+    function GetVideoTotalFrames: Integer;
+    function GetVideoFPS: Double;
+
     property mpv_handle    : Pmpv_handle         read FMPV_HANDLE;
     property Error         : mpv_error           read FError;
     property ErrorString   : String              read GetErrorString;
@@ -869,6 +874,34 @@ end;
 procedure TMPVPlayer.SetTextSize(const AValue: Int64);
 begin
   mpv_set_property_int64('osd-font-size', AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetVideoWidth: Integer;
+begin
+  Result := mpv_get_property_int64('width');
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetVideoHeight: Integer;
+begin
+  Result := mpv_get_property_int64('height');
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetVideoTotalFrames: Integer;
+begin
+  Result := mpv_get_property_int64('estimated-frame-count');
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetVideoFPS: Double;
+begin
+  Result := mpv_get_property_double('container-fps');
 end;
 
 // -----------------------------------------------------------------------------
