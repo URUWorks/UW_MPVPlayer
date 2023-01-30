@@ -487,9 +487,9 @@ begin
   for i := 0 to FStartOptions.Count-1 do
     mpv_set_option_string_(FStartOptions[i]);
 
-  if FRenderMode = rmEmbedding then
+  if FRenderMode <> rmWindow then
   begin
-    // Set our window handle (not necessary for OpenGl)
+    // Set our window handle
     {$IFDEF LINUX}
     pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
     {$ELSE}
