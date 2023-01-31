@@ -183,8 +183,8 @@ begin
     else
       while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
       begin
-        mpv_render_context_report_swap(mpvRenderContext^);
         InvalidateContext;
+        mpv_render_context_report_swap(mpvRenderContext^);
       end;
 
     RTLEventResetEvent(Event);

@@ -625,13 +625,13 @@ begin
   begin
     mpv_set_property_boolean('pause', True);
     FState := psPause;
-    if Assigned(FOnPlay) then FOnPlay(Self);
+    if Assigned(FOnPause) then FOnPause(Self);
   end
   else
   begin
     mpv_set_property_boolean('pause', False);
     FState := psPlay;
-    if Assigned(FOnPause) then FOnPause(Self);
+    if Assigned(FOnPlay) then FOnPlay(Self);
   end;
 end;
 
