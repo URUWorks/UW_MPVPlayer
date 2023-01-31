@@ -2066,7 +2066,7 @@ function libmpv_GetInstallPath: String;
 procedure Free_libMPV;
 function Load_libMPV: Integer;
 
-function IsLibMPVAvailable: Boolean;
+function IsLibMPV_Installed: Boolean;
 
 // -----------------------------------------------------------------------------
 
@@ -2076,7 +2076,7 @@ uses
   SysUtils, dynlibs;
 
 {$IFDEF LINUX}
-function setlocale(category: cint; locale: pchar): pchar; cdecl; external 'c' name 'setlocale';
+  function setlocale(category: cint; locale: pchar): pchar; cdecl; external 'c' name 'setlocale';
 {$ENDIF}
 
 var
@@ -2311,7 +2311,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function IsLibMPVAvailable: Boolean;
+function IsLibMPV_Installed: Boolean;
 var
   FHandle: Pmpv_handle;
 begin
@@ -2329,10 +2329,12 @@ begin
       if not Assigned(FHandle) then
         Exit;
 
-      if mpv_initialize(FHandle^) <> MPV_ERROR_SUCCESS then
-        Exit;
-
-      mpv_terminate_destroy(FHandle^);
+      try
+        if mpv_initialize(FHandle^) <> MPV_ERROR_SUCCESS then
+          Exit;
+      finally
+        mpv_terminate_destroy(FHandle^);
+      end;
 
       Result := True;
     finally

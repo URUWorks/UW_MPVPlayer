@@ -57,6 +57,7 @@ object Form1: TForm1
     Top = 280
     Width = 320
     Anchors = [akLeft, akRight, akBottom]
+    ScrollBars = ssVertical
     TabOrder = 4
   end
   object mpv: TMPVPlayer

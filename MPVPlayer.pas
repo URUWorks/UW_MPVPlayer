@@ -117,6 +117,7 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
+    function IsLibMPVAvailable: Boolean;
     procedure mpv_command_(Args: Array of const);
     procedure mpv_set_option_string_(const AValue: String);
     function mpv_get_property_boolean(const APropertyName: String): Boolean;
@@ -145,11 +146,11 @@ type
     procedure SetPlaybackRate(const AValue: Byte);
     function GetAudioVolume: Integer;
     procedure SetAudioVolume(const AValue: Integer);
-    procedure SetMediaTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
-    procedure SetMediaTrack(const Index: Integer); overload;
-    procedure GetMediaTracks;
-    procedure LoadSubtitle(const AFileName: String);
-    procedure LoadAudio(const AFileName: String);
+    procedure SetTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
+    procedure SetTrack(const Index: Integer); overload;
+    procedure GetTracks;
+    procedure LoadTrack(const TrackType: TMPVPlayerTrackType; const AFileName: String);
+    procedure RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
     procedure ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
@@ -284,6 +285,12 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function TMPVPlayer.IsLibMPVAvailable: Boolean;
+begin
+  Result := IsLibMPV_Installed;
+end;
+
+// -----------------------------------------------------------------------------
 procedure TMPVPlayer.mpv_command_(Args: Array of const);
 var
   pArgs: array of PChar;
@@ -511,7 +518,8 @@ begin
   {$IFNDEF USETIMER}
   mpv_observe_property(FMPV_HANDLE^, 0, 'playback-time', MPV_FORMAT_INT64);
   {$ENDIF}
-  mpv_observe_property(FMPV_HANDLE^, 0, 'paused-for-cache', MPV_FORMAT_INT64);
+  //mpv_observe_property(FMPV_HANDLE^, 0, 'paused-for-cache', MPV_FORMAT_INT64);
+  mpv_observe_property(FMPV_HANDLE^, 0, 'cache-buffering-state', MPV_FORMAT_INT64);
 
   FError := mpv_initialize(FMPV_HANDLE^);
   if FError <> MPV_ERROR_SUCCESS then
@@ -743,7 +751,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.SetMediaTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer);
+procedure TMPVPlayer.SetTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer);
 var
   s: String;
 begin
@@ -760,14 +768,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.SetMediaTrack(const Index: Integer);
+procedure TMPVPlayer.SetTrack(const Index: Integer);
 begin
-  SetMediaTrack(TrackList[Index].Kind, TrackList[Index].ID);
+  SetTrack(TrackList[Index].Kind, TrackList[Index].ID);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.GetMediaTracks;
+procedure TMPVPlayer.GetTracks;
 var
   i, j: integer;
   Node, Map, Detail: mpv_node;
@@ -824,16 +832,41 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.LoadSubtitle(const AFileName: String);
+procedure TMPVPlayer.LoadTrack(const TrackType: TMPVPlayerTrackType; const AFileName: String);
+var
+  s: String;
 begin
-  mpv_command_(['sub-add', AFileName]);
+  If AFileName.IsEmpty then Exit;
+
+  case TrackType of
+    ttAudio    : s := 'audio-add';
+    ttVideo    : s := 'video-add';
+    ttSubtitle : s := 'sub-add';
+  else
+    Exit;
+  end;
+
+  mpv_command_([s, AFileName]);
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.LoadAudio(const AFileName: String);
+procedure TMPVPlayer.RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
+var
+  s: String;
 begin
-  mpv_command_(['audio-add', AFileName]);
+  case TrackType of
+    ttAudio    : s := 'audio-remove';
+    ttVideo    : s := 'video-remove';
+    ttSubtitle : s := 'sub-remove';
+  else
+    Exit;
+  end;
+
+  if ID > -1 then
+    mpv_command_([s, ID])
+  else
+    mpv_command_([s]);
 end;
 
 // -----------------------------------------------------------------------------
@@ -965,15 +998,21 @@ begin
         if Assigned(OnEndFile) then OnEndFile(Sender, Integer(Event^.data^));
       end;
 
+      MPV_EVENT_VIDEO_RECONFIG:
+      begin
+        GetTracks;
+        if Assigned(OnVideoReconfig) then OnVideoReconfig(Sender);
+      end;
+
       MPV_EVENT_AUDIO_RECONFIG:
       begin
-        GetMediaTracks;
+        GetTracks;
         if Assigned(OnAudioReconfig) then OnAudioReconfig(Sender);
       end;
 
       MPV_EVENT_PROPERTY_CHANGE:
       begin
-        if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
+        if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
         begin
           if Assigned(OnBuffering) then
             OnBuffering(Sender, mpv_get_property_int64('cache-buffering-state'));

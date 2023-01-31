@@ -85,12 +85,15 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
+  if not mpv.IsLibMPVAvailable then
+    ShowMessage('Please install libmpv ;)');
+
   fnt := BGLFont('Arial', 20, CSSLightYellow, CSSBlack, [fsBold]);
 end;
 
 procedure TForm1.mpvBuffering(ASender: TObject; AParam: Integer);
 begin
-  Memo1.Lines.Add('Buffering...');
+  Memo1.Lines.Add('Buffering: ' + IntToStr(AParam) + '%');
 end;
 
 procedure TForm1.mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
