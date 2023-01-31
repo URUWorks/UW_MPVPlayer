@@ -87,10 +87,11 @@ type
     FOnAudioReconfig: TNotifyEvent;        // Similar to VIDEO_RECONFIG.
     FOnSeek: TMPVPlayerNotifyEvent;        // Happens when a seek was initiated.
     FOnPlaybackRestart: TNotifyEvent;      // Usually happens on start of playback and after seeking.
-    FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
     FOnPlay: TNotifyEvent;                 // Play by user
     FOnStop: TNotifyEvent;                 // Stop by user
     FOnPause: TNotifyEvent;                // Pause by user
+    FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
+    FOnBuffering: TMPVPlayerNotifyEvent;   // Whether playback is paused because of waiting for the cache.
 
     {$IFDEF BGLCONTROLS}
     FOnDrawEvent: TMPVPlayerDrawEvent;
@@ -250,6 +251,7 @@ type
     property OnStop : TNotifyEvent read FOnStop  write FOnStop;
     property OnPause: TNotifyEvent read FOnPause write FOnPause;
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
+    property OnBuffering: TMPVPlayerNotifyEvent read FOnBuffering write FOnBuffering;
 
     {$IFDEF BGLCONTROLS}
     property OnDraw: TMPVPlayerDrawEvent read FOnDrawEvent write FOnDrawEvent;
@@ -509,6 +511,7 @@ begin
   {$IFNDEF USETIMER}
   mpv_observe_property(FMPV_HANDLE^, 0, 'playback-time', MPV_FORMAT_INT64);
   {$ENDIF}
+  mpv_observe_property(FMPV_HANDLE^, 0, 'paused-for-cache', MPV_FORMAT_INT64);
 
   FError := mpv_initialize(FMPV_HANDLE^);
   if FError <> MPV_ERROR_SUCCESS then
@@ -968,14 +971,22 @@ begin
         if Assigned(OnAudioReconfig) then OnAudioReconfig(Sender);
       end;
 
-      {$IFNDEF USETIMER}
       MPV_EVENT_PROPERTY_CHANGE:
+      begin
+        if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
+        begin
+          if Assigned(OnBuffering) then
+            OnBuffering(Sender, mpv_get_property_int64('cache-buffering-state'));
+        end;
+
+        {$IFNDEF USETIMER}
         if (Pmpv_event_property(Event^.Data)^.Name = 'playback-time') and (Pmpv_event_property(Event^.Data)^.format = MPV_FORMAT_INT64) then
         begin
           if Assigned(OnTimeChanged) then
             OnTimeChanged(Sender, GetMediaPosInMs);
         end;
-      {$ENDIF}
+        {$ENDIF}
+      end;
     end;
   end;
 end;

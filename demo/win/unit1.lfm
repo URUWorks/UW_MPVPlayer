@@ -78,6 +78,7 @@ object Form1: TForm1
     OnStop = mpvStop
     OnPause = mpvPause
     OnTimeChanged = mpvTimeChanged
+    OnBuffering = mpvBuffering
     OnDraw = mpvDraw
   end
   object TrackBar1: TTrackBar

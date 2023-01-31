@@ -30,6 +30,7 @@ type
     procedure Button4Click(Sender: TObject);
     procedure Button5Click(Sender: TObject);
     procedure FormCreate(Sender: TObject);
+    procedure mpvBuffering(ASender: TObject; AParam: Integer);
     procedure mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
     procedure mpvFileLoaded(Sender: TObject);
     procedure mpvPause(Sender: TObject);
@@ -87,6 +88,11 @@ begin
   fnt := BGLFont('Arial', 20, CSSLightYellow, CSSBlack, [fsBold]);
 end;
 
+procedure TForm1.mpvBuffering(ASender: TObject; AParam: Integer);
+begin
+  Memo1.Lines.Add('Buffering...');
+end;
+
 procedure TForm1.mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
 begin
   fnt.TextOut(ABGLCanvas.Width div 2, ABGLCanvas.Height div 2, 'BGRABitmap is amazing!', taCenter, tlCenter);
@@ -97,7 +103,7 @@ begin
   TrackBar1.Max := mpv.GetMediaLenInMs;
   Label2.Caption := inttostr(TrackBar1.Max) + 'ms';
 
-  Memo1.Lines.Add('File loaded!');
+  Memo1.Lines.Add('File loaded');
   Memo1.Lines.Add('Video Width: ' + IntToStr(mpv.GetVideoWidth));
   Memo1.Lines.Add('Video Height: ' + IntToStr(mpv.GetVideoHeight));
   Memo1.Lines.Add('Video Total Frames: ' + IntToStr(mpv.GetVideoTotalFrames));
