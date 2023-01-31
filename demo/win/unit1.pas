@@ -17,6 +17,7 @@ type
     Button2: TButton;
     Button3: TButton;
     Button4: TButton;
+    Button5: TButton;
     Label1: TLabel;
     Label2: TLabel;
     Memo1: TMemo;
@@ -27,12 +28,17 @@ type
     procedure Button2Click(Sender: TObject);
     procedure Button3Click(Sender: TObject);
     procedure Button4Click(Sender: TObject);
+    procedure Button5Click(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
     procedure mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
     procedure mpvFileLoaded(Sender: TObject);
+    procedure mpvPause(Sender: TObject);
+    procedure mpvPlay(Sender: TObject);
     procedure mpvStartFile(Sender: TObject);
+    procedure mpvStop(Sender: TObject);
     procedure mpvTimeChanged(ASender: TObject; AParam: Integer);
   private
-
+    fnt: IBGLRenderedFont;
   public
 
   end;
@@ -71,11 +77,18 @@ begin
   mpv.ShowText(Caption);
 end;
 
-procedure TForm1.mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
-var
-  fnt: IBGLRenderedFont;
+procedure TForm1.Button5Click(Sender: TObject);
 begin
-  fnt := BGLFont('Arial', 20, CSSLightYellow,CSSBlack, [fsBold]);
+  mpv.Play('http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
+end;
+
+procedure TForm1.FormCreate(Sender: TObject);
+begin
+  fnt := BGLFont('Arial', 20, CSSLightYellow, CSSBlack, [fsBold]);
+end;
+
+procedure TForm1.mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
+begin
   fnt.TextOut(ABGLCanvas.Width div 2, ABGLCanvas.Height div 2, 'BGRABitmap is amazing!', taCenter, tlCenter);
 end;
 
@@ -91,9 +104,24 @@ begin
   Memo1.Lines.Add('Video FPS: ' + FloatToStr(mpv.GetVideoFPS));
 end;
 
+procedure TForm1.mpvPause(Sender: TObject);
+begin
+  Memo1.Lines.Add('paused');
+end;
+
+procedure TForm1.mpvPlay(Sender: TObject);
+begin
+  Memo1.Lines.Add('playing');
+end;
+
 procedure TForm1.mpvStartFile(Sender: TObject);
 begin
   Memo1.Lines.Add('reading file');
+end;
+
+procedure TForm1.mpvStop(Sender: TObject);
+begin
+    Memo1.Lines.Add('stopped');
 end;
 
 procedure TForm1.mpvTimeChanged(ASender: TObject; AParam: Integer);
