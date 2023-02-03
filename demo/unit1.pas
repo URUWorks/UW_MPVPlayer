@@ -21,6 +21,7 @@ type
     Label1: TLabel;
     Label2: TLabel;
     Memo1: TMemo;
+    Memo2: TMemo;
     mpv: TMPVPlayer;
     od: TOpenDialog;
     TrackBar1: TTrackBar;
@@ -33,6 +34,7 @@ type
     procedure mpvBuffering(ASender: TObject; AParam: Integer);
     procedure mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
     procedure mpvFileLoaded(Sender: TObject);
+    procedure mpvLogMessage(ASender: TObject; APrefix, ALevel, AText: String);
     procedure mpvPause(Sender: TObject);
     procedure mpvPlay(Sender: TObject);
     procedure mpvStartFile(Sender: TObject);
@@ -88,6 +90,7 @@ begin
   if not mpv.IsLibMPVAvailable then
     ShowMessage('Please install libmpv ;)');
 
+  //mpv.RendererMode := rmEmbedding;
   fnt := BGLFont('Arial', 20, CSSLightYellow, CSSBlack, [fsBold]);
 end;
 
@@ -111,6 +114,12 @@ begin
   Memo1.Lines.Add('Video Height: ' + IntToStr(mpv.GetVideoHeight));
   Memo1.Lines.Add('Video Total Frames: ' + IntToStr(mpv.GetVideoTotalFrames));
   Memo1.Lines.Add('Video FPS: ' + FloatToStr(mpv.GetVideoFPS));
+end;
+
+procedure TForm1.mpvLogMessage(ASender: TObject; APrefix, ALevel, AText: String
+  );
+begin
+  Memo2.Lines.Add(Format('(%s) %s: %s', [APrefix, ALevel, AText]));
 end;
 
 procedure TForm1.mpvPause(Sender: TObject);
