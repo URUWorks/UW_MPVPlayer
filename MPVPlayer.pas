@@ -41,10 +41,12 @@ type
 
   { TMPVPlayer Types }
 
-  TMPVPlayerRenderMode  = (rmWindow, rmEmbedding, rmOpenGL);
+  TMPVPlayerRenderMode  = (rmEmbedding, rmOpenGL);
   TMPVPlayerSate        = (psStop, psPlay, psPause, psEnd);
   TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
+  TMPVPlayerLogLevel    = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
+  TMPVPlayerLogEvent    = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
 
   TMPVPlayerTrackInfo = record
     Kind     : TMPVPlayerTrackType;
@@ -67,11 +69,13 @@ type
     FGL           : TOpenGLControl;
     FInitialized  : Boolean;
     FStartOptions : TStringList;
+    FLogLevel     : TMPVPlayerLogLevel;
     FMPVEvent     : TMPVPlayerThreadEvent;
     FState        : TMPVPlayerSate;
     FTrackList    : TMPVPlayerTrackList;
     FAutoStart    : Boolean;
     FAutoLoadSub  : Boolean;
+    FKeepAspect   : Boolean;
     FStartAtPosMs : Integer;
     FFileName     : String;
     {$IFDEF USETIMER}
@@ -92,6 +96,7 @@ type
     FOnPause: TNotifyEvent;                // Pause by user
     FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
     FOnBuffering: TMPVPlayerNotifyEvent;   // Whether playback is paused because of waiting for the cache.
+    FOnLogMessage: TMPVPlayerLogEvent;     // Receives messages enabled with mpv_request_log_messages().
 
     {$IFDEF BGLCONTROLS}
     FOnDrawEvent: TMPVPlayerDrawEvent;
@@ -107,6 +112,7 @@ type
     procedure ReceivedEvent(Sender: TObject);
 
     procedure SetRenderMode(Value: TMPVPlayerRenderMode);
+    function LogLevelToString: String;
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -238,7 +244,9 @@ type
 
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
+    property KeepAspect: Boolean read FKeepAspect write FKeepAspect;
     property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
+    property LogLevel: TMPVPlayerLogLevel read FLogLevel write FLogLevel;
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
     property OnEndFile: TMPVPlayerNotifyEvent read FOnEndFile write FOnEndFile;
@@ -253,6 +261,7 @@ type
     property OnPause: TNotifyEvent read FOnPause write FOnPause;
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
     property OnBuffering: TMPVPlayerNotifyEvent read FOnBuffering write FOnBuffering;
+    property OnLogMessage: TMPVPlayerLogEvent read FOnLogMessage write FOnLogMessage;
 
     {$IFDEF BGLCONTROLS}
     property OnDraw: TMPVPlayerDrawEvent read FOnDrawEvent write FOnDrawEvent;
@@ -427,9 +436,11 @@ begin
   FError         := 0;
   FInitialized   := False;
   FMPVEvent      := NIL;
+  FLogLevel      := llStatus;
   FState         := psStop;
   FAutoStart     := True;
   FAutoLoadSub   := False;
+  FKeepAspect    := True;
   FFileName      := '';
   FRenderMode    := rmOpenGL;
   FStartOptions  := TStringList.Create;
@@ -473,7 +484,7 @@ end;
 function TMPVPlayer.Initialize: Boolean;
 var
   i: Integer;
-  pHwnd: PtrUInt;
+  pHwnd: PtrInt;
 begin
   FInitialized := False;
   Result := False;
@@ -498,10 +509,13 @@ begin
   if not FAutoLoadSub then
     FStartOptions.Add('sub=no'); // don't load subtitles
 
+  if not FKeepAspect then
+    FStartOptions.Add('no-keepaspect'); // always stretch the video to window size
+
   for i := 0 to FStartOptions.Count-1 do
     mpv_set_option_string_(FStartOptions[i]);
 
-  if FRenderMode <> rmWindow then
+  if FRenderMode = rmEmbedding then
   begin
     // Set our window handle
     {$IFDEF LINUX}
@@ -528,7 +542,7 @@ begin
     Exit;
   end;
 
-  FError := mpv_request_log_messages(FMPV_HANDLE^, 'no');
+  FError := mpv_request_log_messages(FMPV_HANDLE^, PChar(LogLevelToString));
 
   FMPVEvent := TMPVPlayerThreadEvent.Create;
   FMPVEvent.OnEvent := @ReceivedEvent;
@@ -614,6 +628,24 @@ end;
 function TMPVPlayer.GetVersionString: String;
 begin
   Result := Format('libmpv %d.%d', [FVersion shr 16, FVersion and $FF]);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.LogLevelToString: String;
+begin
+  case FLogLevel of
+    llFatal  : Result := 'fatal';  // fatal messages only
+    llError  : Result := 'error';  // error messages
+    llWarn   : Result := 'warn';   // warning messages
+    llInfo   : Result := 'info';   // informational messages
+    llStatus : Result := 'status'; // status messages (default)
+    llV      : Result := 'v';      // verbose messages
+    llDebug  : Result := 'debug';  // debug messages
+    llTrace  : Result := 'trace';  // very noisy debug messages
+  else
+    Result := 'no'; // complete silence
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -963,6 +995,12 @@ begin
       begin
         Break;
       end;
+
+      MPV_EVENT_LOG_MESSAGE:
+        if Assigned(OnLogMessage) then OnLogMessage(Sender,
+          Pmpv_event_log_message(Event^.Data)^.prefix,
+          Pmpv_event_log_message(Event^.Data)^.level,
+          Pmpv_event_log_message(Event^.Data)^.Text);
 
       MPV_EVENT_START_FILE:
         if Assigned(OnStartFile) then OnStartFile(Sender);
