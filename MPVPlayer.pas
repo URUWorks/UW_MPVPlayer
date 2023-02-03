@@ -33,6 +33,7 @@ uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
   LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
   MPVPlayer.RenderGL, OpenGLContext
+  {$IFDEF LINUX}, gtk2, gdk2x{$ENDIF}
   {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF};
 
 // -----------------------------------------------------------------------------
