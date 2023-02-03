@@ -192,6 +192,7 @@ type
     property BidiMode;
     property BorderWidth;
     property BorderStyle;
+    property Caption;
     property ChildSizing;
     property ClientHeight;
     property ClientWidth;
