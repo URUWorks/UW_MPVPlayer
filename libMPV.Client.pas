@@ -1573,6 +1573,7 @@ type
       MPV_LOG_LEVEL_TRACE = 70; {/ "trace" - extremely noisy }
 
   type
+    pmpv_event_log_message = ^_mpv_event_log_message;
     _mpv_event_log_message = record
        {*
         * The module prefix, identifies the sender of the message. As a special
@@ -1637,6 +1638,7 @@ type
 
   type
     {/ Since API version 1.108. }
+    pmpv_event_start_file = ^_mpv_event_start_file;
     _mpv_event_start_file = record
         {*
          * Playlist entry ID of the file being loaded now.
@@ -1644,6 +1646,7 @@ type
         playlist_entry_id : int64;
       end;
 
+    pmpv_event_end_file = ^_mpv_event_end_file;
     _mpv_event_end_file = record
         {*
          * Corresponds to the values in enum mpv_end_file_reason.
@@ -1694,11 +1697,13 @@ type
        * None of the valid items are NULL.
         }
 
+    pmpv_event_client_message = ^_mpv_event_client_message;
     _mpv_event_client_message = record
         num_args : integer;
         args : PPchar;
       end;
 
+    pmpv_event_hook = ^_mpv_event_hook;
     _mpv_event_hook = record
         {*
          * The hook name as passed to mpv_hook_add().
