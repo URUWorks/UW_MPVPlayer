@@ -2080,7 +2080,7 @@ implementation
 uses
   SysUtils, dynlibs;
 
-{$IFDEF LINUX}
+{$IFDEF UNIX}
   function setlocale(category: cint; locale: pchar): pchar; cdecl; external 'c' name 'setlocale';
 {$ENDIF}
 
@@ -2212,7 +2212,7 @@ end;
 function Load_libMPV: Integer;
 begin
   Result := MPV_ERROR_UNINITIALIZED;
-  {$IFDEF LINUX}
+  {$IFDEF UNIX}
   setlocale(1, 'C');
   {$ENDIF}
 
