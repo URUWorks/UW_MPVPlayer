@@ -125,7 +125,7 @@ type
     destructor Destroy; override;
 
     function IsLibMPVAvailable: Boolean;
-    procedure mpv_command_(args: array of const);
+    function mpv_command_(args: array of const): mpv_error;
     procedure mpv_set_option_string_(const AValue: String);
     function mpv_get_property_boolean(const APropertyName: String): Boolean;
     procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
@@ -301,11 +301,13 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
-procedure TMPVPlayer.mpv_command_(args: array of const);
+function TMPVPlayer.mpv_command_(args: array of const): mpv_error;
 var
   pArgs: array of PChar;
   i: Integer;
 begin
+  Result := MPV_ERROR_INVALID_PARAMETER;
+
   if High(Args) < 0 then
     Exit
   else if FInitialized then
@@ -319,7 +321,11 @@ begin
 
     FError := mpv_command(FMPV_HANDLE^, PPChar(@pArgs[0]));
     SetLength(pArgs, 0);
-  end;
+  end
+  else
+    FError := MPV_ERROR_UNINITIALIZED;
+
+  Result := FError;
 end;
 
 // -----------------------------------------------------------------------------
@@ -753,14 +759,22 @@ end;
 // -----------------------------------------------------------------------------
 procedure TMPVPlayer.NextFrame;
 begin
-  mpv_command_(['frame-step']);
+  if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and (FState <> psPause) then
+  begin
+    FState := psPause;
+    if Assigned(FOnPause) then FOnPause(Self);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.PreviousFrame;
 begin
-  mpv_command_(['frame-back-step']);
+  if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and (FState <> psPause) then
+  begin
+    FState := psPause;
+    if Assigned(FOnPause) then FOnPause(Self);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
