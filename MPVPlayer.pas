@@ -125,7 +125,7 @@ type
     destructor Destroy; override;
 
     function IsLibMPVAvailable: Boolean;
-    procedure mpv_command_(Args: Array of const);
+    procedure mpv_command_(args: array of const);
     procedure mpv_set_option_string_(const AValue: String);
     function mpv_get_property_boolean(const APropertyName: String): Boolean;
     procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
@@ -301,19 +301,21 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
-procedure TMPVPlayer.mpv_command_(Args: Array of const);
+procedure TMPVPlayer.mpv_command_(args: array of const);
 var
   pArgs: array of PChar;
   i: Integer;
 begin
-  if FInitialized and (High(Args) > 0) then
+  if High(Args) < 0 then
+    Exit
+  else if FInitialized then
   begin
-    SetLength(pArgs, High(Args)+1);
+    SetLength(pArgs, High(Args)+2);
 
     for i := 0 to High(Args) do
       pArgs[i] := Args[i].VAnsiString;
 
-    pArgs[High(Args)+1] := NIL;
+    pArgs[High(Args)+2] := NIL;
 
     FError := mpv_command(FMPV_HANDLE^, PPChar(@pArgs[0]));
     SetLength(pArgs, 0);
