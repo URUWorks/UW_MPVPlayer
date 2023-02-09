@@ -31,7 +31,7 @@ uses ctypes;
 // -----------------------------------------------------------------------------
 
 const
-  {$IFDEF WINDOWS}LIBMPV_DLL_NAME = 'mpv-2.dll';{$ENDIF}
+  {$IFDEF WINDOWS}LIBMPV_DLL_NAME = 'libmpv-2.dll';{$ENDIF}
   {$IFDEF LINUX}LIBMPV_DLL_NAME = 'libmpv.so';{$ENDIF}
   {$IFDEF DARWIN}LIBMPV_DLL_NAME = 'libmpv.dylib';{$ENDIF}
 
