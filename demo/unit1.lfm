@@ -84,7 +84,6 @@ object Form1: TForm1
     OnTimeChanged = mpvTimeChanged
     OnBuffering = mpvBuffering
     OnLogMessage = mpvLogMessage
-    OnDraw = mpvDraw
   end
   object TrackBar1: TTrackBar
     Left = 8
