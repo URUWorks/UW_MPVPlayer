@@ -922,8 +922,6 @@ end;
 
 procedure TMPVPlayer.ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
 begin
-  if AText.IsEmpty then Exit;
-
   if Duration = 0 then
     Duration := mpv_get_property_int64('osd-duration');
 
