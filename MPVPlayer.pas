@@ -43,7 +43,6 @@ type
   { TMPVPlayer Types }
 
   TMPVPlayerRenderMode  = (rmEmbedding, rmOpenGL);
-  TMPVPlayerSate        = (psStop, psPlay, psPause, psEnd);
   TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerLogLevel    = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
@@ -53,6 +52,8 @@ type
     Kind     : TMPVPlayerTrackType;
     ID       : Integer;
     Codec    : String;
+    Decoder  : String;
+    Channels : String;
     Title    : String;
     Lang     : String;
     Selected : Boolean;
@@ -72,7 +73,6 @@ type
     FStartOptions : TStringList;
     FLogLevel     : TMPVPlayerLogLevel;
     FMPVEvent     : TMPVPlayerThreadEvent;
-    FState        : TMPVPlayerSate;
     FTrackList    : TMPVPlayerTrackList;
     FAutoStart    : Boolean;
     FAutoLoadSub  : Boolean;
@@ -114,6 +114,7 @@ type
 
     procedure SetRenderMode(Value: TMPVPlayerRenderMode);
     function LogLevelToString: String;
+    function SetWID: Boolean;
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -126,6 +127,7 @@ type
 
     function IsLibMPVAvailable: Boolean;
     function mpv_command_(args: array of const): mpv_error;
+    function mpv_command_node_(ANode: mpv_node): mpv_error;
     procedure mpv_set_option_string_(const AValue: String);
     function mpv_get_property_boolean(const APropertyName: String): Boolean;
     procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
@@ -133,14 +135,18 @@ type
     procedure mpv_set_property_double(const AProperty: String; const AValue: Double);
     function mpv_get_property_int64(const AProperty: String): Int64;
     procedure mpv_set_property_int64(const AProperty: String; const AValue: Int64);
+    procedure mpv_set_pause(const Value: Boolean);
 
     function GetErrorString: String;
     function GetVersionString: String;
     function GetPlayerHandle: Pmpv_handle;
 
-    procedure Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
+    procedure Play(const AFileName: String; const AStartAtPositionMs: Integer = 0); overload;
+    procedure Play(const FromMs: Integer); overload;
+    procedure Close;
+    procedure Loop(const AStartTimeMs, BFinalTimeMs: Integer; const ALoopCount: Integer = -1); // string format hh:mm:ss.zzz
     procedure Pause;
-    procedure Resume;
+    procedure Resume(const ForcePlay: Boolean = False);
     procedure Stop;
     function IsPlaying: Boolean;
     function IsPaused: Boolean;
@@ -158,7 +164,8 @@ type
     procedure GetTracks;
     procedure LoadTrack(const TrackType: TMPVPlayerTrackType; const AFileName: String);
     procedure RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
-    procedure ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
+    procedure ShowOverlayText(const AText: String; const AVisible: Boolean; const AId: Integer = 1);
+    procedure ShowText(const AText: String);
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
     procedure SetTextVAlign(const AValue: String);
@@ -295,12 +302,31 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function MSToTimeStamp(const Time: Integer): String; // 'hh:mm:ss.zzz'
+var
+  Hour, Min, Secs, MSecs,
+  h, m, x: Integer;
+begin
+  Hour  := Trunc(Time / 3600000);
+  h     := Time - (Hour*3600000);
+  Min   := Trunc(h / 60000);
+  m     := Min * 60000;
+  x     := h - m;
+  Secs  := Trunc(x / 1000);
+  MSecs := Trunc(x - (Secs*1000));
+
+  Result := Format('%.2d:%.2d:%.2d.%.3d', [Hour, Min, Secs, MSecs]);
+end;
+
+// -----------------------------------------------------------------------------
+
 function TMPVPlayer.IsLibMPVAvailable: Boolean;
 begin
   Result := IsLibMPV_Installed;
 end;
 
 // -----------------------------------------------------------------------------
+
 function TMPVPlayer.mpv_command_(args: array of const): mpv_error;
 var
   pArgs: array of PChar;
@@ -310,7 +336,7 @@ begin
 
   if High(Args) < 0 then
     Exit
-  else if FInitialized then
+  else if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     SetLength(pArgs, High(Args)+2);
 
@@ -330,12 +356,26 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function TMPVPlayer.mpv_command_node_(ANode: mpv_node): mpv_error;
+var
+  Res: mpv_node;
+begin
+  FError := MPV_ERROR_UNINITIALIZED;
+
+  if FInitialized and (FMPV_HANDLE <> NIL) then
+    FError := mpv_command_node(FMPV_HANDLE^, ANode, Res);
+
+  Result := FError;
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVPlayer.mpv_set_option_string_(const AValue: String);
 var
   s1, s2: String;
   i: Integer;
 begin
-  if AValue.IsEmpty or not Assigned(mpv_set_option_string) then Exit;
+  if AValue.IsEmpty or not Assigned(mpv_set_option_string) or (FMPV_HANDLE = NIL) then Exit;
 
   i := Pos('=', AValue);
   if i > 0 then
@@ -418,6 +458,13 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVPlayer.mpv_set_pause(const Value: Boolean);
+begin
+  mpv_set_property_boolean('pause', Value);
+end;
+
+// -----------------------------------------------------------------------------
+
 { TMPVPlayer }
 
 // -----------------------------------------------------------------------------
@@ -446,21 +493,25 @@ begin
   FInitialized   := False;
   FMPVEvent      := NIL;
   FLogLevel      := llStatus;
-  FState         := psStop;
   FAutoStart     := True;
   FAutoLoadSub   := False;
   FKeepAspect    := True;
   FFileName      := '';
-  FRenderMode    := rmOpenGL;
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
+
+  {$IFDEF WINDOWS}
+  FRenderMode    := rmEmbedding;
+  {$ELSE}
+  FRenderMode    := rmOpenGL;
+  {$ENDIF}
 
   FRenderGL   := NIL;
 
   {$IFDEF USETIMER}
   FTimer          := TTimer.Create(NIL);
   FTimer.Enabled  := False;
-  FTimer.Interval := 75;
+  FTimer.Interval := 140;
   FTimer.OnTimer  := @DoTimer;
   {$ENDIF}
 
@@ -493,7 +544,6 @@ end;
 function TMPVPlayer.Initialize: Boolean;
 var
   i: Integer;
-  pHwnd: PtrInt;
 begin
   FInitialized := False;
   Result := False;
@@ -524,19 +574,8 @@ begin
   for i := 0 to FStartOptions.Count-1 do
     mpv_set_option_string_(FStartOptions[i]);
 
-  if FRenderMode = rmEmbedding then
-  begin
-    // Set our window handle
-    {$IFDEF LINUX}
-    pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
-    {$ELSE}
-    pHwnd := Self.Handle;
-    {$ENDIF}
-    FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
-
-    if FError <> MPV_ERROR_SUCCESS then
-      Exit;
-  end;
+  // Set our window handle
+  if not SetWID then Exit;
 
   {$IFNDEF USETIMER}
   mpv_observe_property(FMPV_HANDLE^, 0, 'playback-time', MPV_FORMAT_INT64);
@@ -569,6 +608,10 @@ end;
 procedure TMPVPlayer.UnInitialize;
 begin
   if not FInitialized then Exit;
+
+  {$IFDEF USETIMER}
+  FTimer.Enabled := False;
+  {$ENDIF}
 
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
@@ -659,10 +702,36 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function TMPVPlayer.SetWID: Boolean;
+var
+  pHwnd: PtrInt;
+begin
+  if FRenderMode = rmEmbedding then
+  begin
+    {$IFDEF LINUX}
+    pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
+    {$ELSE}
+    pHwnd := Self.Handle;
+    {$ENDIF}
+    FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
+    Result := FError = MPV_ERROR_SUCCESS;
+  end
+  else
+    Result := True;
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVPlayer.Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
 begin
-  if not FInitialized then
+  if not FInitialized and (not AFileName.IsEmpty) then
     Initialize;
+
+  if AFileName.IsEmpty then
+  begin
+    UnInitialize;
+    Exit;
+  end;
 
   FStartAtPosMs := AStartAtPositionMs;
   FFileName := AFileName;
@@ -671,30 +740,67 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.Pause;
+procedure TMPVPlayer.Play(const FromMs: Integer);
 begin
-  if IsPlaying then
+  SeekInMs(FromMs);
+  Resume(True);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.Close;
+begin
+  UnInitialize;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.Loop(const AStartTimeMs, BFinalTimeMs: Integer; const ALoopCount: Integer = -1);
+begin
+  if (AStartTimeMs = 0) and (BFinalTimeMs = 0) then
   begin
-    mpv_set_property_boolean('pause', True);
-    FState := psPause;
-    if Assigned(FOnPause) then FOnPause(Self);
+    mpv_set_option_string_('ab-loop-a=no');
+    mpv_set_option_string_('ab-loop-b=no');
   end
   else
   begin
-    mpv_set_property_boolean('pause', False);
-    FState := psPlay;
-    if Assigned(FOnPlay) then FOnPlay(Self);
+    SeekInMs(AStartTimeMs);
+
+    mpv_set_option_string_('ab-loop-a=' + MSToTimeStamp(AStartTimeMs));
+    mpv_set_option_string_('ab-loop-b=' + MSToTimeStamp(BFinalTimeMs));
+
+    if ALoopCount > 0 then
+      mpv_set_option_string_('ab-loop-count=' + ALoopCount.ToString)
+    else
+      mpv_set_option_string_('ab-loop-count=0');
+
+    if IsPaused then Resume;
   end;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.Resume;
+procedure TMPVPlayer.Pause;
 begin
-  if IsPaused then
+  Loop(0, 0);
+
+  if IsPlaying then
   begin
-    mpv_set_property_boolean('pause', False);
-    FState := psPlay;
+    mpv_set_pause(True);
+    if Assigned(FOnPause) then FOnPause(Self);
+  end
+  else
+    Resume(True);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.Resume(const ForcePlay: Boolean = False);
+begin
+  if ForcePlay or IsPaused then
+  begin
+    mpv_set_pause(False);
+    if Assigned(FOnPlay) then FOnPlay(Self);
   end;
 end;
 
@@ -702,27 +808,27 @@ end;
 
 procedure TMPVPlayer.Stop;
 begin
-  if FState <> psStop then
-  begin
-    mpv_set_property_boolean('pause', True);
-    SetMediaPosInMs(0);
-    FState := psStop;
-    if Assigned(FOnStop) then FOnStop(Self);
-  end;
+  Loop(0, 0);
+
+  if not IsPaused then
+    mpv_set_pause(True);
+
+  SetMediaPosInMs(0);
+  if Assigned(FOnStop) then FOnStop(Self);
 end;
 
 // -----------------------------------------------------------------------------
 
 function TMPVPlayer.IsPlaying: Boolean;
 begin
-  Result := (FState = psPlay);
+  Result := not IsPaused;
 end;
 
 // -----------------------------------------------------------------------------
 
 function TMPVPlayer.IsPaused: Boolean;
 begin
-  Result := (FState = psPause);
+  Result := (mpv_get_property_boolean('pause') = True);
 end;
 
 // -----------------------------------------------------------------------------
@@ -759,22 +865,16 @@ end;
 // -----------------------------------------------------------------------------
 procedure TMPVPlayer.NextFrame;
 begin
-  if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and (FState <> psPause) then
-  begin
-    FState := psPause;
+  if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and not IsPaused then
     if Assigned(FOnPause) then FOnPause(Self);
-  end;
 end;
 
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.PreviousFrame;
 begin
-  if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and (FState <> psPause) then
-  begin
-    FState := psPause;
+  if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and IsPaused then
     if Assigned(FOnPause) then FOnPause(Self);
-  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -867,6 +967,10 @@ begin
             FTrackList[i].Lang := StrPas(Detail.u._string)
           else if Key = 'codec' then
             FTrackList[i].Codec := StrPas(Detail.u._string)
+          else if Key = 'decoder-desc' then
+            FTrackList[i].Decoder := StrPas(Detail.u._string)
+          else if Key = 'demux-channels' then
+            FTrackList[i].Channels := StrPas(Detail.u._string)
           else if Key = 'selected' then
             FTrackList[i].Selected := Detail.u.flag = 1;
 
@@ -920,14 +1024,45 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.ShowText(const AText: String; Duration: Integer = 0; FontSize: Integer = 0);
+procedure TMPVPlayer.ShowOverlayText(const AText: String; const AVisible: Boolean; const AId: Integer = 1);
+var
+  Node: mpv_node;
+  List: mpv_node_list;
+  Keys: array of PChar;
+  Values: mpv_node_array;
 begin
-  if Duration = 0 then
-    Duration := mpv_get_property_int64('osd-duration');
+  if not FInitialized then Exit;
 
-  if FontSize = 0 then
-    FontSize := mpv_get_property_int64('osd-font-size');
+  SetLength(Keys, 4);
+  Keys[0]               := 'name';
+  Values[0].format      := MPV_FORMAT_STRING;
+  Values[0].u._string   := 'osd-overlay';
+  Keys[1]               := 'id';
+  Values[1].format      := MPV_FORMAT_INT64;
+  Values[1].u.int64_    := AId;
+  Keys[2]               := 'format';
+  Values[2].format      := MPV_FORMAT_STRING;
+  if AVisible then
+    Values[2].u._string := 'ass-events'
+  else
+    Values[2].u._string := 'none';
+  Keys[3]               := 'data';
+  Values[3].format      := MPV_FORMAT_STRING;
+  Values[3].u._string   := PChar('{\fscx75\fscy75\shad0}'+AText);
 
+  List.num    := 4;
+  List.keys   := @Keys[0];
+  List.values := @values[0];
+  Node.format := MPV_FORMAT_NODE_MAP;
+  Node.u.list := @List;
+
+  mpv_command_node_(Node);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ShowText(const AText: String);
+begin
   mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + AText]);
 end;
 
@@ -1008,6 +1143,12 @@ begin
     case (Event^.event_id) of
       MPV_EVENT_SHUTDOWN:
       begin
+        if (FRenderMode = rmOpenGL) and Assigned(FRenderGL) then
+          FRenderGL.Active := False;
+
+        {$IFDEF USETIMER}
+        FTimer.Enabled := False;
+        {$ENDIF}
         Break;
       end;
 
@@ -1022,10 +1163,6 @@ begin
 
       MPV_EVENT_FILE_LOADED:
       begin
-        if FAutoStart then
-          FState := psPlay
-        else
-          FState := psPause;
         {$IFDEF USETIMER}
         FTimer.Enabled := True;
         {$ENDIF}
@@ -1044,10 +1181,6 @@ begin
 
       MPV_EVENT_END_FILE:
       begin
-        FState := psEnd;
-        {$IFDEF USETIMER}
-        FTimer.Enabled := False;
-        {$ENDIF}
         if Assigned(OnEndFile) then OnEndFile(Sender, Integer(Event^.data^));
       end;
 
@@ -1096,7 +1229,9 @@ end;
 {$IFDEF USETIMER}
 procedure TMPVPlayer.DoTimer(Sender: TObject);
 begin
+  FTimer.Enabled := False;
   if Assigned(OnTimeChanged) then OnTimeChanged(Sender, GetMediaPosInMs);
+  FTimer.Enabled := True;
 end;
 {$ENDIF}
 

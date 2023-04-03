@@ -80,10 +80,13 @@ type
   TMPVPlayerRenderGL = class
   private
     FThread: TMPVPlayerRenderThread;
+    function GetRenderActive: Boolean;
+    procedure SetRenderActive(const AValue: Boolean);
   public
     constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Render(const ForceInvalidate: Boolean = False);
+    property Active: Boolean read GetRenderActive write SetRenderActive;
   end;
 
 // -----------------------------------------------------------------------------
@@ -263,7 +266,7 @@ procedure TMPVPlayerRenderThread.InvalidateContext;
 {$ENDIF}
 begin
   Update_mpvfbo;
-  if not Terminated then
+  if not Terminated and IsRenderActive then
   begin
     FGL.MakeCurrent();
     mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
@@ -294,8 +297,12 @@ end;
 
 destructor TMPVPlayerRenderGL.Destroy;
 begin
-  if Assigned(FThread) then FThread.Terminate;
-  FThread := NIL;
+  if Assigned(FThread) then
+  begin
+    FThread.IsRenderActive := False;
+    FThread.Terminate;
+    FThread := NIL;
+  end;
 
   inherited Destroy;
 end;
@@ -309,6 +316,24 @@ begin
     FThread.ForceInvalidateContext := ForceInvalidate;
     RTLEventSetEvent(FThread.Event);
   end;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayerRenderGL.GetRenderActive: Boolean;
+begin
+  if Assigned(FThread) then
+    Result := FThread.IsRenderActive
+  else
+    Result := False;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayerRenderGL.SetRenderActive(const AValue: Boolean);
+begin
+  if Assigned(FThread) and (FThread.IsRenderActive <> AValue) then
+    FThread.IsRenderActive := AValue;
 end;
 
 // -----------------------------------------------------------------------------
