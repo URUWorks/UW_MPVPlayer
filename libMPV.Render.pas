@@ -768,7 +768,7 @@ var
 // -----------------------------------------------------------------------------
 
 procedure Free_libMPV_Render;
-function Load_libMPV_Render: Boolean;
+function Load_libMPV_Render(const AFileName: String = ''): Boolean;
 
 // -----------------------------------------------------------------------------
 
@@ -784,7 +784,12 @@ var
 
 procedure Free_libMPV_Render;
 begin
-  if hLib <> 0 then FreeLibrary(hLib);
+  if hLib <> dynlibs.NilHandle then
+  begin
+    if UnloadLibrary(hLib) then
+      hLib := dynlibs.NilHandle;
+  end;
+
   mpv_render_context_create := NIL;
   mpv_render_context_set_parameter := NIL;
   mpv_render_context_get_info := NIL;
@@ -797,12 +802,16 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function Load_libMPV_Render: Boolean;
+function Load_libMPV_Render(const AFileName: String = ''): Boolean;
 begin
   Result := False;
 
-  hLib := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF});
-  if hLib = 0 then Exit;
+  if AFileName.IsEmpty then
+    hLib := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF})
+  else
+    hLib := LoadLibrary(AFileName);
+
+  if hLib = dynlibs.NilHandle then Exit;
 
   Pointer(mpv_render_context_create) := GetProcAddress(hLib,'mpv_render_context_create');
   Pointer(mpv_render_context_set_parameter) := GetProcAddress(hLib,'mpv_render_context_set_parameter');
@@ -832,7 +841,7 @@ end;
 // -----------------------------------------------------------------------------
 
 initialization
-  hLib := 0;
+  hLib := dynlibs.NilHandle;
 
 // -----------------------------------------------------------------------------
 
