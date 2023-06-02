@@ -65,25 +65,35 @@ type
 
   TMPVPlayer = class(TCustomPanel)
   private
-    FMPV_HANDLE   : Pmpv_handle;
-    FError        : mpv_error;
-    FVersion      : DWord;
-    FGL           : TOpenGLControl;
-    FInitialized  : Boolean;
-    FStartOptions : TStringList;
-    FLogLevel     : TMPVPlayerLogLevel;
-    FMPVEvent     : TMPVPlayerThreadEvent;
-    FTrackList    : TMPVPlayerTrackList;
-    FAutoStart    : Boolean;
-    FAutoLoadSub  : Boolean;
-    FKeepAspect   : Boolean;
-    FStartAtPosMs : Integer;
-    FFileName     : String;
+    FMPV_HANDLE     : Pmpv_handle;
+    FError          : mpv_error;
+    FVersion        : DWord;
+    FGL             : TOpenGLControl;
+    FInitialized    : Boolean;
+    FStartOptions   : TStringList;
+    FLogLevel       : TMPVPlayerLogLevel;
+    FMPVEvent       : TMPVPlayerThreadEvent;
+    FTrackList      : TMPVPlayerTrackList;
+    FAutoStart      : Boolean;
+    FAutoLoadSub    : Boolean;
+    FKeepAspect     : Boolean;
+    FSMPTEMode      : Boolean;
+    //FFPSIsInteger   : Boolean;
+    FStartAtPosMs   : Integer;
+    FFileName       : String;
+    FMPVFileName    : String;
+    FYTDLPFileName  : String;
     {$IFDEF USETIMER}
-    FTimer        : TTimer;
+    FTimer          : TTimer;
     {$ENDIF}
-    FRenderMode   : TMPVPlayerRenderMode;
-    FRenderGL     : TMPVPlayerRenderGL;
+    FRenderMode     : TMPVPlayerRenderMode;
+    FRenderGL       : TMPVPlayerRenderGL;
+
+    FText           : String;
+    FTextNode       : mpv_node;
+    FTextNodeList   : mpv_node_list;
+    FTextNodeKeys   : array of PChar;
+    FTextNodeValues : mpv_node_array;
 
     FOnStartFile: TNotifyEvent;            // Notification before playback start of a file (before the file is loaded).
     FOnEndFile: TMPVPlayerNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
@@ -154,18 +164,20 @@ type
     function GetMediaPosInMs: Integer;
     procedure SetMediaPosInMs(const AValue: Integer);
     procedure SeekInMs(const MSecs: Integer; const SeekAbsolute: Boolean = True);
-    procedure NextFrame;
-    procedure PreviousFrame;
+    procedure NextFrame(const AStep: Integer = 1);
+    procedure PreviousFrame(const AStep: Integer = 1);
     procedure SetPlaybackRate(const AValue: Byte);
-    function GetAudioVolume: Integer;
-    procedure SetAudioVolume(const AValue: Integer);
+    function GetAudioVolume: Byte;
+    procedure SetAudioVolume(const AValue: Byte);
+    function GetAudioMute: Boolean;
+    procedure SetAudioMute(const AValue: Boolean);
     procedure SetTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
     procedure SetTrack(const Index: Integer); overload;
     procedure GetTracks;
     procedure LoadTrack(const TrackType: TMPVPlayerTrackType; const AFileName: String);
     procedure RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
-    procedure ShowOverlayText(const AText: String; const AVisible: Boolean; const AId: Integer = 1);
-    procedure ShowText(const AText: String);
+    procedure ShowOverlayText(const AText: String);
+    procedure ShowText(const AText: String; const ATags: String = '{\an7}');
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
     procedure SetTextVAlign(const AValue: String);
@@ -176,6 +188,9 @@ type
     function GetVideoTotalFrames: Integer;
     function GetVideoFPS: Double;
 
+    procedure AddOption(const AValue: String);
+    procedure RemoveOption(const AValue: String);
+
     property mpv_handle    : Pmpv_handle         read FMPV_HANDLE;
     property Error         : mpv_error           read FError;
     property ErrorString   : String              read GetErrorString;
@@ -185,7 +200,9 @@ type
     property StartOptions  : TStringList         read FStartOptions;
     property TrackList     : TMPVPlayerTrackList read FTrackList;
     property FileName      : String              read FFileName;
-
+    property MPVFileName   : String              read FMPVFileName   write FMPVFileName;
+    property YTDLPFileName : String              read FYTDLPFileName write FYTDLPFileName;
+    property SMPTEMode     : Boolean             read FSMPTEMode     write FSMPTEMode;
     {$IFDEF USETIMER}
     property Timer         : TTimer read FTimer;
     {$ENDIF}
@@ -282,9 +299,6 @@ procedure Register;
 
 implementation
 
-const
-  LIBMPV_MAX_VOLUME = 100;
-
 // -----------------------------------------------------------------------------
 
 { libmpv wakeup_events }
@@ -320,9 +334,20 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function FramesToMS(const Frames, FPS: Single): Integer;
+begin
+  if FPS > 0 then
+    Result := Round((Frames / FPS) * 1000.0)
+  else
+    Result := 0;
+end;
+
+// -----------------------------------------------------------------------------
+
 function TMPVPlayer.IsLibMPVAvailable: Boolean;
 begin
-  Result := IsLibMPV_Installed;
+  FError := IsLibMPV_Installed(FMPVFileName);
+  Result := (FError = MPV_ERROR_SUCCESS);
 end;
 
 // -----------------------------------------------------------------------------
@@ -331,17 +356,28 @@ function TMPVPlayer.mpv_command_(args: array of const): mpv_error;
 var
   pArgs: array of PChar;
   i: Integer;
+  s: String;
 begin
   Result := MPV_ERROR_INVALID_PARAMETER;
 
   if High(Args) < 0 then
     Exit
-  else if FInitialized and (FMPV_HANDLE <> NIL) then
+  else if FInitialized and (mpv_command <> NIL) and (FMPV_HANDLE <> NIL) then
   begin
     SetLength(pArgs, High(Args)+2);
 
     for i := 0 to High(Args) do
-      pArgs[i] := Args[i].VAnsiString;
+    begin
+      case Args[i].VType of
+        vtInteger    : s := IntToStr(Args[i].VInteger);
+        vtChar       : s := Args[i].VChar;
+        vtString     : s := Args[i].VString^;
+        vtPChar      : s := Args[i].VPChar;
+        vtAnsiString : s := AnsiString(Args[I].VAnsiString);
+      end;
+
+      pArgs[i] := PChar(s);
+    end;
 
     pArgs[High(Args)+2] := NIL;
 
@@ -375,7 +411,7 @@ var
   s1, s2: String;
   i: Integer;
 begin
-  if AValue.IsEmpty or not Assigned(mpv_set_option_string) or (FMPV_HANDLE = NIL) then Exit;
+  if not Assigned(mpv_set_option_string) or (FMPV_HANDLE = NIL) or AValue.IsEmpty then Exit;
 
   i := Pos('=', AValue);
   if i > 0 then
@@ -496,7 +532,11 @@ begin
   FAutoStart     := True;
   FAutoLoadSub   := False;
   FKeepAspect    := True;
+  FSMPTEMode     := False;
+  //FFPSIsInteger  := False;
   FFileName      := '';
+  FMPVFileName   := LIBMPV_DLL_NAME;
+  FYTDLPFileName := '';
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
 
@@ -505,8 +545,7 @@ begin
   {$ELSE}
   FRenderMode    := rmOpenGL;
   {$ENDIF}
-
-  FRenderGL   := NIL;
+  FRenderGL      := NIL;
 
   {$IFDEF USETIMER}
   FTimer          := TTimer.Create(NIL);
@@ -517,10 +556,25 @@ begin
 
   with FStartOptions do
   begin
-    Add('hwdec=auto');       // enable best hw decoder
-    Add('keep-open=always'); // don't auto close video
-    Add('vd-lavc-dr=no');    // fix possibles deadlock issues with OpenGL
+    Sorted     := True;
+    Duplicates := dupIgnore;
+
+//    {$IFDEF WINDOWS}
+    Add('hwdec=no');             // fix some windows crash
+//    {$ELSE}
+//    Add('hwdec=auto');           // enable best hw decoder.
+//    {$ENDIF}
+    Add('keep-open=always');     // don't auto close video.
+    Add('vd-lavc-dr=no');        // fix possibles deadlock issues with OpenGL
+    Add('hr-seek=yes');          // use precise seeks whenever possible.
+    Add('hr-seek-framedrop=no'); // default: yes.
+    Add('seekbarkeyframes=no');  // default: yes.
+    Add('ytdl=yes');             // youtube
   end;
+
+  {$IFDEF WINDOWS}
+  FError := Load_libMPV(FMPVFileName);
+  {$ENDIF}
 end;
 
 // -----------------------------------------------------------------------------
@@ -536,6 +590,9 @@ begin
   FStartOptions.Free;
   FStartOptions := NIL;
 
+  {$IFDEF WINDOWS}
+  Free_libMPV;
+  {$ENDIF}
   inherited Destroy;
 end;
 
@@ -543,18 +600,26 @@ end;
 
 function TMPVPlayer.Initialize: Boolean;
 var
-  i: Integer;
+  sl : TStringList;
+  i  : Integer;
 begin
+  if FInitialized then Exit;
+
   FInitialized := False;
   Result := False;
 
-  FError := Load_libMPV;
-  if FError <> MPV_ERROR_SUCCESS then Exit;
+  {$IFDEF WINDOWS}
+  if not IsLibMPV_Loaded then Exit;
+  {$ELSE}
+  FError := Load_libMPV(FMPVFileName);
+  if FError = MPV_ERROR_UNINITIALIZED then Exit;
+  {$ENDIF}
 
   FMPV_HANDLE := mpv_create();
   if not Assigned(FMPV_HANDLE) then
   begin
     FError := MPV_ERROR_UNSUPPORTED;
+    Free_libMPV;
     Exit;
   end;
 
@@ -562,35 +627,70 @@ begin
   if Assigned(mpv_client_api_version) then
     FVersion := mpv_client_api_version();
 
-  if not FAutoStart then
-    FStartOptions.Add('pause');  // Start the player in paused state.
+  sl := TStringList.Create;
+  try
+    sl.Assign(FStartOptions);
 
-  if not FAutoLoadSub then
-    FStartOptions.Add('sub=no'); // don't load subtitles
+    if not FAutoStart then
+      sl.Add('pause');  // Start the player in paused state.
 
-  if not FKeepAspect then
-    FStartOptions.Add('no-keepaspect'); // always stretch the video to window size
+    if not FAutoLoadSub then
+      sl.Add('sub=no'); // don't load subtitles
 
-  for i := 0 to FStartOptions.Count-1 do
-    mpv_set_option_string_(FStartOptions[i]);
+    if not FKeepAspect then
+      sl.Add('no-keepaspect'); // always stretch the video to window size
+
+    for i := 0 to sl.Count-1 do
+      mpv_set_option_string_(sl[i]);
+  finally
+    sl.Free;
+  end;
+
+  if not FYTDLPFileName.IsEmpty then
+    mpv_set_option_string(FMPV_HANDLE^, PChar('script-opts'), PChar('ytdl_hook-ytdl_path='+FYTDLPFileName));
 
   // Set our window handle
-  if not SetWID then Exit;
+  if not SetWID then
+  begin
+    UnInitialize;
+    Exit;
+  end;
 
   {$IFNDEF USETIMER}
   mpv_observe_property(FMPV_HANDLE^, 0, 'playback-time', MPV_FORMAT_INT64);
   {$ENDIF}
+  mpv_observe_property(FMPV_HANDLE^, 0, 'eof-reached', MPV_FORMAT_FLAG);
   //mpv_observe_property(FMPV_HANDLE^, 0, 'paused-for-cache', MPV_FORMAT_INT64);
   mpv_observe_property(FMPV_HANDLE^, 0, 'cache-buffering-state', MPV_FORMAT_INT64);
 
   FError := mpv_initialize(FMPV_HANDLE^);
   if FError <> MPV_ERROR_SUCCESS then
   begin
-    Free_libMPV;
+    UnInitialize;
     Exit;
   end;
 
   FError := mpv_request_log_messages(FMPV_HANDLE^, PChar(LogLevelToString));
+
+  // Node text overlay cfg
+  FText := '';
+  SetLength(FTextNodeKeys, 4);
+  FTextNodeKeys[0]             := 'name';
+  FTextNodeValues[0].format    := MPV_FORMAT_STRING;
+  FTextNodeValues[0].u._string := 'osd-overlay';
+  FTextNodeKeys[1]             := 'id';
+  FTextNodeValues[1].format    := MPV_FORMAT_INT64;
+  FTextNodeValues[1].u.int64_  := 1;
+  FTextNodeKeys[2]             := 'format';
+  FTextNodeValues[2].format    := MPV_FORMAT_STRING;
+  FTextNodeKeys[3]             := 'data';
+  FTextNodeValues[3].format    := MPV_FORMAT_STRING;
+  FTextNodeValues[3].u._string := NIL;
+  FTextNodeList.num            := 4;
+  FTextNodeList.keys           := @FTextNodeKeys[0];
+  FTextNodeList.values         := @FTextNodeValues[0];
+  FTextNode.format             := MPV_FORMAT_NODE_MAP;
+  FTextNode.u.list             := @FTextNodeList;
 
   FMPVEvent := TMPVPlayerThreadEvent.Create;
   FMPVEvent.OnEvent := @ReceivedEvent;
@@ -609,6 +709,8 @@ procedure TMPVPlayer.UnInitialize;
 begin
   if not FInitialized then Exit;
 
+  mpv_command_(['stop']);
+
   {$IFDEF USETIMER}
   FTimer.Enabled := False;
   {$ENDIF}
@@ -616,8 +718,12 @@ begin
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
 
+  FText := '';
+  SetLength(FTextNodeKeys, 0);
+
   if Assigned(FMPVEvent) then
   begin
+    FMPVEvent.OnEvent := NIL;
     FMPVEvent.Free;
     FMPVEvent := NIL;
   end;
@@ -631,31 +737,43 @@ begin
   FMPV_HANDLE := NIL;
   SetLength(FTrackList, 0);
   FFileName := '';
-  FInitialized := False;
+  //FFPSIsInteger := False;
+  FInitialized  := False;
+  {$IFDEF DARWIN}
+  Free_libMPV;
+  {$ENDIF}
 end;
 
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.InitializeRenderGL;
 begin
-  FGL          := TOpenGLControl.Create(Self);
-  FGL.Parent   := Self;
-  FGL.Align    := alClient;
-  FGL.OnClick  := OnClick;
+  FGL         := TOpenGLControl.Create(Self);
+  FGL.Parent  := Self;
+  FGL.Align   := alClient;
+  FGL.OnClick := OnClick;
+  FGL.OnMouseWheelUp   := OnMouseWheelUp;
+  FGL.OnMouseWheelDown := OnMouseWheelDown;
   FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
-  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
+  FRenderGL := TMPVPlayerRenderGL.Create(MPVFileName, FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
 end;
 
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.UnInitializeRenderGL;
 begin
-  FRenderGL.Free;
-  FRenderGL := NIL;
+  If Assigned(FRenderGL) then
+  begin
+    FRenderGL.Free;
+    FRenderGL := NIL;
+  end;
 
-  FGL.Free;
-  FGL := NIL;
+  if Assigned(FGL) then
+  begin
+    FGL.Free;
+    FGL := NIL;
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -708,6 +826,9 @@ var
 begin
   if FRenderMode = rmEmbedding then
   begin
+    Result := False;
+    if not Assigned(mpv_set_option) or not Assigned(FMPV_HANDLE) then Exit;
+
     {$IFDEF LINUX}
     pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
     {$ELSE}
@@ -724,18 +845,14 @@ end;
 
 procedure TMPVPlayer.Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
 begin
-  if not FInitialized and (not AFileName.IsEmpty) then
-    Initialize;
+  Initialize;
 
-  if AFileName.IsEmpty then
+  if FInitialized then
   begin
-    UnInitialize;
-    Exit;
+    FStartAtPosMs := AStartAtPositionMs;
+    FFileName := AFileName;
+    mpv_command_(['loadfile', FFileName]);
   end;
-
-  FStartAtPosMs := AStartAtPositionMs;
-  FFileName := AFileName;
-  mpv_command_(['loadfile', FFileName]);
 end;
 
 // -----------------------------------------------------------------------------
@@ -799,6 +916,9 @@ procedure TMPVPlayer.Resume(const ForcePlay: Boolean = False);
 begin
   if ForcePlay or IsPaused then
   begin
+    if GetMediaPosInMs = GetMediaLenInMs then
+      SetMediaPosInMs(0);
+
     mpv_set_pause(False);
     if Assigned(FOnPlay) then FOnPlay(Self);
   end;
@@ -835,21 +955,33 @@ end;
 
 function TMPVPlayer.GetMediaLenInMs: Integer;
 begin
-  Result := Trunc(mpv_get_property_double('duration') * 1000);
+  Result := Round(mpv_get_property_double('duration') * 1000.0);
 end;
 
 // -----------------------------------------------------------------------------
 
 function TMPVPlayer.GetMediaPosInMs: Integer;
+var
+  i: Double;
 begin
-  Result := Trunc(mpv_get_property_double('time-pos') * 1000);
+  i := mpv_get_property_double('time-pos') * 1000.0;
+    if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
+    Result := Round(i / 1.001)
+  else
+    Result := Round(i);
 end;
 
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.SetMediaPosInMs(const AValue: Integer);
+var
+  i: Double;
 begin
-  mpv_set_property_double('time-pos', AValue / 1000);
+  i := AValue / 1000.0;
+  if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
+    mpv_set_property_double('time-pos', i * 1.001)
+  else
+    mpv_set_property_double('time-pos', i);
 end;
 
 // -----------------------------------------------------------------------------
@@ -863,18 +995,41 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
-procedure TMPVPlayer.NextFrame;
+
+procedure TMPVPlayer.NextFrame(const AStep: Integer = 1);
+var
+  f: Double;
 begin
-  if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and not IsPaused then
-    if Assigned(FOnPause) then FOnPause(Self);
+  if AStep > 1 then
+  begin
+    f := GetVideoFPS;
+    if f > 0 then
+      SetMediaPosInMs(GetMediaPosInMs + FramesToMS(AStep, f));
+  end
+  else
+  begin
+    if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and not IsPaused then
+      if Assigned(FOnPause) then FOnPause(Self);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.PreviousFrame;
+procedure TMPVPlayer.PreviousFrame(const AStep: Integer = 1);
+var
+  f: Double;
 begin
-  if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and IsPaused then
-    if Assigned(FOnPause) then FOnPause(Self);
+  if AStep > 1 then
+  begin
+    f := GetVideoFPS;
+    if f > 0 then
+      SetMediaPosInMs(GetMediaPosInMs - FramesToMS(AStep, f));
+  end
+  else
+  begin
+    if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and IsPaused then
+      if Assigned(FOnPause) then FOnPause(Self);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -886,16 +1041,30 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.GetAudioVolume: Integer;
+function TMPVPlayer.GetAudioVolume: Byte;
 begin
-  Result := Trunc(mpv_get_property_double('volume') * (255 / LIBMPV_MAX_VOLUME));
+  Result := Trunc(mpv_get_property_int64('volume'));
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.SetAudioVolume(const AValue: Integer);
+procedure TMPVPlayer.SetAudioVolume(const AValue: Byte);
 begin
-  mpv_set_property_double('volume', AValue * (LIBMPV_MAX_VOLUME / 255));
+  mpv_set_property_int64('volume', AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetAudioMute: Boolean;
+begin
+  Result := mpv_get_property_boolean('mute');
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetAudioMute(const AValue: Boolean);
+begin
+  mpv_set_property_boolean('mute', AValue);
 end;
 
 // -----------------------------------------------------------------------------
@@ -931,6 +1100,8 @@ var
   Keys: PPChar;
   Key, Value: String;
 begin
+  if not Assigned(mpv_get_property) or not Assigned(FMPV_HANDLE) then Exit;
+
   FError := mpv_get_property(FMPV_HANDLE^, 'track-list', MPV_FORMAT_NODE, @Node);
   if FError = MPV_ERROR_SUCCESS then
   begin
@@ -1024,46 +1195,29 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.ShowOverlayText(const AText: String; const AVisible: Boolean; const AId: Integer = 1);
-var
-  Node: mpv_node;
-  List: mpv_node_list;
-  Keys: array of PChar;
-  Values: mpv_node_array;
+procedure TMPVPlayer.ShowOverlayText(const AText: String);
 begin
-  if not FInitialized then Exit;
+  if not FInitialized then
+    Exit
+  else if (AText <> FText) then
+  begin
+    FText := AText;
+    if AText.IsEmpty then
+      FTextNodeValues[2].u._string := 'none'
+    else
+      FTextNodeValues[2].u._string := 'ass-events';
 
-  SetLength(Keys, 4);
-  Keys[0]               := 'name';
-  Values[0].format      := MPV_FORMAT_STRING;
-  Values[0].u._string   := 'osd-overlay';
-  Keys[1]               := 'id';
-  Values[1].format      := MPV_FORMAT_INT64;
-  Values[1].u.int64_    := AId;
-  Keys[2]               := 'format';
-  Values[2].format      := MPV_FORMAT_STRING;
-  if AVisible then
-    Values[2].u._string := 'ass-events'
-  else
-    Values[2].u._string := 'none';
-  Keys[3]               := 'data';
-  Values[3].format      := MPV_FORMAT_STRING;
-  Values[3].u._string   := PChar('{\fscx75\fscy75\shad0}'+AText);
-
-  List.num    := 4;
-  List.keys   := @Keys[0];
-  List.values := @values[0];
-  Node.format := MPV_FORMAT_NODE_MAP;
-  Node.u.list := @List;
-
-  mpv_command_node_(Node);
+    //FTextNodeValues[3].u._string := PChar(AText);
+    FTextNodeValues[3].u._string := PChar('{\fscx75\fscy75\shad0}'+AText);
+    mpv_command_node_(FTextNode);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.ShowText(const AText: String);
+procedure TMPVPlayer.ShowText(const AText: String; const ATags: String = '{\an7}');
 begin
-  mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + AText]);
+  mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + ATags + AText]);
 end;
 
 // -----------------------------------------------------------------------------
@@ -1167,6 +1321,8 @@ begin
         FTimer.Enabled := True;
         {$ENDIF}
 
+        //FFPSIsInteger := Frac(GetVideoFPS) = 0;
+
         if (FStartAtPosMs > 0) then
         begin
           SetMediaPosInMs(FStartAtPosMs);
@@ -1198,7 +1354,12 @@ begin
 
       MPV_EVENT_PROPERTY_CHANGE:
       begin
-        if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
+        if (Pmpv_event_property(Event^.Data)^.Name = 'eof-reached') then
+        begin
+          if Assigned(OnEndFile) and (GetMediaPosInMs >= GetMediaLenInMs) then
+            OnEndFile(Sender, 0);
+        end
+        else if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
         begin
           if Assigned(OnBuffering) then
             OnBuffering(Sender, mpv_get_property_int64('cache-buffering-state'));
@@ -1241,6 +1402,25 @@ procedure TMPVPlayer.DoResize(Sender: TObject);
 begin
   if Assigned(FRenderGL) and not IsPlaying then
     FRenderGL.Render(True);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.AddOption(const AValue: String);
+begin
+  RemoveOption(AValue);
+  FStartOptions.Add(AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.RemoveOption(const AValue: String);
+var
+  i: Integer;
+begin
+  i := FStartOptions.IndexOfName(Copy(AValue, 1, Pos('=', AValue)));
+  if i > -1 then
+    FStartOptions.Delete(i);
 end;
 
 // -----------------------------------------------------------------------------
