@@ -116,7 +116,8 @@ end;
 
 procedure TMPVPlayerCustomThreadEvent.HandleEvent;
 begin
-  if Assigned(FOwner.OnEvent) then FOwner.OnEvent(FOwner);
+  if Assigned(FOwner) and Assigned(FOwner.OnEvent) then
+   FOwner.OnEvent(FOwner);
 end;
 
 // -----------------------------------------------------------------------------
