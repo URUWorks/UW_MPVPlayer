@@ -33,7 +33,7 @@ uses ctypes;
 const
   {$IFDEF WINDOWS}LIBMPV_DLL_NAME = 'libmpv-2.dll';{$ENDIF}
   {$IFDEF LINUX}LIBMPV_DLL_NAME = 'libmpv.so';{$ENDIF}
-  {$IFDEF DARWIN}LIBMPV_DLL_NAME = 'libmpv.dylib';{$ENDIF}
+  {$IFDEF DARWIN}LIBMPV_DLL_NAME = 'libmpv.1.dylib';{$ENDIF}
 
 type
   Pmpv_handle = ^mpv_handle;
@@ -1188,6 +1188,17 @@ type
   mpv_set_property_string : function(var ctx:mpv_handle; const name:Pchar; const data:Pchar):longint;cdecl;
 
   {*
+   * Convenience function to delete a property.
+   *
+   * This is equivalent to running the command "del [name]".
+   *
+   * @param name The property name. See input.rst for a list of properties.
+   * @return error code
+   *}
+
+  mpv_del_property : function(var ctx:mpv_handle; const name:Pchar):longint;cdecl;
+
+  {*
    * Set a property asynchronously. You will receive the result of the operation
    * as MPV_EVENT_SET_PROPERTY_REPLY event. The mpv_event.error field will contain
    * the result status of the operation. Otherwise, this function is similar to
@@ -2069,9 +2080,10 @@ var
 function libmpv_GetInstallPath: String;
 {$ENDIF}
 procedure Free_libMPV;
-function Load_libMPV: Integer;
+function Load_libMPV(const AFileName: String = ''): Integer;
 
-function IsLibMPV_Installed: Boolean;
+function IsLibMPV_Loaded: Boolean;
+function IsLibMPV_Installed(const AFileName: String = ''): Integer;
 
 // -----------------------------------------------------------------------------
 
@@ -2160,7 +2172,11 @@ end;
 
 procedure Free_libMPV;
 begin
-  if hLib <> 0 then FreeLibrary(hLib);
+  if hLib <> dynlibs.NilHandle then
+  begin
+    if UnloadLibrary(hLib) then
+      hLib := dynlibs.NilHandle;
+  end;
 
   mpv_client_api_version := NIL;
   mpv_error_string := NIL;
@@ -2209,16 +2225,19 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function Load_libMPV: Integer;
+function Load_libMPV(const AFileName: String = ''): Integer;
 begin
-  Result := MPV_ERROR_UNINITIALIZED;
+  Result := MPV_ERROR_GENERIC;
   {$IFDEF UNIX}
   setlocale(1, 'C');
   {$ENDIF}
 
+  if AFileName.IsEmpty then
+    hLib := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF})
+  else
+    hLib := LoadLibrary(AFileName);
 
-  hLib := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF});
-  if (hLib = 0) then Exit;
+  if (hLib = dynlibs.NilHandle) then Exit;
 
   Pointer(mpv_client_api_version) := GetProcAddress(hLib,'mpv_client_api_version');
   Pointer(mpv_error_string) := GetProcAddress(hLib,'mpv_error_string');
@@ -2308,7 +2327,7 @@ begin
      not Assigned(mpv_get_wakeup_pipe) then
   begin
     Free_libMPV;
-    Exit;
+    Exit(MPV_ERROR_UNSUPPORTED);
   end;
 
   Result := MPV_ERROR_SUCCESS;
@@ -2316,32 +2335,36 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function IsLibMPV_Installed: Boolean;
+function IsLibMPV_Loaded: Boolean;
+begin
+  Result := hLib <> dynlibs.NilHandle;
+end;
+
+// -----------------------------------------------------------------------------
+
+function IsLibMPV_Installed(const AFileName: String = ''): Integer;
 var
   FHandle: Pmpv_handle;
 begin
-  Result := False;
+  Result := MPV_ERROR_GENERIC;
 
-  if hLib <> 0 then
-  begin
-    Result := True;
-    Exit;
-  end;
+  if IsLibMPV_Loaded then
+    Exit(MPV_ERROR_SUCCESS);
 
-  if Load_libMPV = MPV_ERROR_SUCCESS then
+  if Load_libMPV(AFileName) = MPV_ERROR_SUCCESS then
     try
       FHandle := mpv_create();
       if not Assigned(FHandle) then
-        Exit;
+        Exit(MPV_ERROR_UNSUPPORTED);
 
       try
         if mpv_initialize(FHandle^) <> MPV_ERROR_SUCCESS then
-          Exit;
+          Exit(MPV_ERROR_UNINITIALIZED);
       finally
         mpv_terminate_destroy(FHandle^);
       end;
 
-      Result := True;
+      Result := MPV_ERROR_SUCCESS;
     finally
       FHandle := NIL;
       Free_libMPV;
@@ -2351,7 +2374,7 @@ end;
 // -----------------------------------------------------------------------------
 
 initialization
-  hLib := 0;
+  hLib := dynlibs.NilHandle;
 
 // -----------------------------------------------------------------------------
 
