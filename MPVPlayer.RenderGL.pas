@@ -83,7 +83,7 @@ type
     function GetRenderActive: Boolean;
     procedure SetRenderActive(const AValue: Boolean);
   public
-    constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+    constructor Create(AMPVFileName: String; AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Render(const ForceInvalidate: Boolean = False);
     property Active: Boolean read GetRenderActive write SetRenderActive;
@@ -287,10 +287,10 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderGL.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+constructor TMPVPlayerRenderGL.Create(AMPVFileName: String; AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
   FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self {$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
-  if Load_libMPV_Render then FThread.Start;
+  if Load_libMPV_Render(AMPVFileName) then FThread.Start;
 end;
 
 // -----------------------------------------------------------------------------
