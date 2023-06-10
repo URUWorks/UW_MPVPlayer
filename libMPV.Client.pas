@@ -2119,7 +2119,7 @@ end;
 function libmpv_GetInstallPath: String;
 const
   {$IFDEF LINUX}
-  pathLst : array[0..5] of string = (
+  pathLst : array[0..5] of String = (
     '/usr/lib',
     '/lib',
     '/usr/local/lib',
@@ -2128,7 +2128,7 @@ const
     '/usr/lib/x86_64-linux-gnu'
   );
   {$ELSE}
-  pathLst : array[0..2] of string = (
+  pathLst : array[0..2] of String = (
     '/usr/local/lib',
     '/Desktop/mpv.app/Contents/MacOS',
     '/Applications/mpv.app/Contents/MacOS'
@@ -2136,7 +2136,7 @@ const
   {$ENDIF}
 var
   pathIdx : Integer;
-  pathStr : string;
+  pathStr : String;
   sr      : TSearchRec;
   re      : Integer;
 begin
