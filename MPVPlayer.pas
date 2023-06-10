@@ -19,6 +19,10 @@
  *
  *  Based on the great work of OvoM3U
  *  Copyright (C) 2020 Marco Caselli.
+ *
+ *  Important for Unix/Linux needs:
+ *    - cthreads
+ *    - XInitThreads
  *}
 
 unit MPVPlayer;
@@ -535,7 +539,11 @@ begin
   FSMPTEMode     := False;
   //FFPSIsInteger  := False;
   FFileName      := '';
+  {$IFDEF LINUX}
+  FMPVFileName   := '';
+  {$ELSE}
   FMPVFileName   := LIBMPV_DLL_NAME;
+  {$ENDIF}
   FYTDLPFileName := '';
   FStartOptions  := TStringList.Create;
   SetLength(FTrackList, 0);
@@ -773,6 +781,7 @@ begin
   begin
     FGL.Free;
     FGL := NIL;
+    Invalidate;
   end;
 end;
 
@@ -965,10 +974,10 @@ var
   i: Double;
 begin
   i := mpv_get_property_double('time-pos') * 1000.0;
-    if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
-    Result := Round(i / 1.001)
+  if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
+    Result := Trunc(i / 1.001)
   else
-    Result := Round(i);
+    Result := Trunc(i);
 end;
 
 // -----------------------------------------------------------------------------
