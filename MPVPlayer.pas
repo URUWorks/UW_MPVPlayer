@@ -17,9 +17,6 @@
  *
  *  Copyright (C) 2021-2023 URUWorks, uruworks@gmail.com.
  *
- *  Based on the great work of OvoM3U
- *  Copyright (C) 2020 Marco Caselli.
- *
  *  Important for Unix/Linux needs:
  *    - cthreads
  *    - XInitThreads
@@ -180,6 +177,7 @@ type
     procedure GetTracks;
     procedure LoadTrack(const TrackType: TMPVPlayerTrackType; const AFileName: String);
     procedure RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
+    procedure ReloadTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
     procedure ShowOverlayText(const AText: String);
     procedure ShowText(const AText: String; const ATags: String = '{\an7}');
     procedure SetTextColor(const AValue: String);
@@ -1192,6 +1190,26 @@ begin
     ttAudio    : s := 'audio-remove';
     ttVideo    : s := 'video-remove';
     ttSubtitle : s := 'sub-remove';
+  else
+    Exit;
+  end;
+
+  if ID > -1 then
+    mpv_command_([s, ID])
+  else
+    mpv_command_([s]);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ReloadTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
+var
+  s: String;
+begin
+  case TrackType of
+    ttAudio    : s := 'audio-reload';
+    ttVideo    : s := 'video-reload';
+    ttSubtitle : s := 'sub-reload';
   else
     Exit;
   end;
