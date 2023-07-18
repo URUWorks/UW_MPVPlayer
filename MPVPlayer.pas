@@ -18,6 +18,7 @@
  *  Copyright (C) 2021-2023 URUWorks, uruworks@gmail.com.
  *
  *  Important for Unix/Linux needs:
+ *    Place the following units/functions at the beginning
  *    - cthreads
  *    - XInitThreads
  *}
