@@ -160,6 +160,7 @@ type
     procedure Pause;
     procedure Resume(const ForcePlay: Boolean = False);
     procedure Stop;
+    function IsMediaLoaded: Boolean;
     function IsPlaying: Boolean;
     function IsPaused: Boolean;
     function GetMediaLenInMs: Integer;
@@ -943,6 +944,13 @@ begin
 
   SetMediaPosInMs(0);
   if Assigned(FOnStop) then FOnStop(Self);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.IsMediaLoaded: Boolean;
+begin
+  Result := GetMediaLenInMs > 0;
 end;
 
 // -----------------------------------------------------------------------------
