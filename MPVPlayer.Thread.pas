@@ -16,9 +16,6 @@
  *  rights and limitations under the License.
  *
  *  Copyright (C) 2021-2023 URUWorks, uruworks@gmail.com.
- *
- *  Based on the great work of OvoM3U
- *  Copyright (C) 2020 Marco Caselli.
  *}
 
 unit MPVPlayer.Thread;
