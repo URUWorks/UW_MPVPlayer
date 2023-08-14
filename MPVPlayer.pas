@@ -87,6 +87,7 @@ type
     FYTDLPFileName  : String;
     {$IFDEF USETIMER}
     FTimer          : TTimer;
+    FLastPos        : Integer;
     {$ENDIF}
     FRenderMode     : TMPVPlayerRenderMode;
     FRenderGL       : TMPVPlayerRenderGL;
@@ -560,6 +561,7 @@ begin
   FTimer.Enabled  := False;
   FTimer.Interval := 140;
   FTimer.OnTimer  := @DoTimer;
+  FLastPos        := -1;
   {$ENDIF}
 
   with FStartOptions do
@@ -721,6 +723,7 @@ begin
 
   {$IFDEF USETIMER}
   FTimer.Enabled := False;
+  FLastPos       := -1;
   {$ENDIF}
 
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
@@ -982,9 +985,9 @@ var
 begin
   i := mpv_get_property_double('time-pos') * 1000.0;
   if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
-    Result := Trunc(i / 1.001)
+    Result := Round(i / 1.001)
   else
-    Result := Trunc(i);
+    Result := Round(i);
 end;
 
 // -----------------------------------------------------------------------------
@@ -1338,6 +1341,7 @@ begin
 
         {$IFDEF USETIMER}
         FTimer.Enabled := False;
+        FLastPos       := -1;
         {$ENDIF}
         Break;
       end;
@@ -1355,6 +1359,7 @@ begin
       begin
         {$IFDEF USETIMER}
         FTimer.Enabled := True;
+        FLastPos       := -1;
         {$ENDIF}
 
         //FFPSIsInteger := Frac(GetVideoFPS) = 0;
@@ -1425,9 +1430,18 @@ end;
 
 {$IFDEF USETIMER}
 procedure TMPVPlayer.DoTimer(Sender: TObject);
+var
+  Pos: Integer;
 begin
   FTimer.Enabled := False;
-  if Assigned(OnTimeChanged) then OnTimeChanged(Sender, GetMediaPosInMs);
+
+  Pos := GetMediaPosInMs;
+  if Assigned(OnTimeChanged) and (FLastPos <> Pos) then
+  begin
+    OnTimeChanged(Sender, Pos);
+    FLastPos := Pos;
+  end;
+
   FTimer.Enabled := True;
 end;
 {$ENDIF}
