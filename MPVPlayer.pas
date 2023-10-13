@@ -193,6 +193,8 @@ type
     function GetVideoTotalFrames: Integer;
     function GetVideoFPS: Double;
 
+    procedure ScreenshotToFile(const AFileName: String); // name with full path, extension defines the format (file.png)
+
     procedure AddOption(const AValue: String);
     procedure RemoveOption(const AValue: String);
 
@@ -1313,6 +1315,13 @@ end;
 function TMPVPlayer.GetVideoFPS: Double;
 begin
   Result := mpv_get_property_double('container-fps');
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ScreenshotToFile(const AFileName: String);
+begin
+  mpv_command_(['screenshot-to-file', AFileName]);
 end;
 
 // -----------------------------------------------------------------------------
