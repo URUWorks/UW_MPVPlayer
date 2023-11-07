@@ -671,7 +671,7 @@ type
   mpv_load_config_file : function(var ctx:mpv_handle; filename:Pchar):longint;cdecl;
 
   {*
-   * Return the internal time in microseconds. This has an arbitrary start offset,
+   * Return the internal time in nanoseconds. This has an arbitrary start offset,
    * but will never wrap or go backwards.
    *
    * Note that this is always the real time, and doesn't necessarily have to do
@@ -684,6 +684,12 @@ type
    *
    * Safe to be called from mpv render API threads.
     }
+
+  mpv_get_time_ns : function(var ctx:mpv_handle):int64;cdecl;
+
+  {*
+   * Same as mpv_get_time_ns but in microseconds.
+   *}
 
   mpv_get_time_us : function(var ctx:mpv_handle):int64;cdecl;
 
@@ -2110,7 +2116,7 @@ end;
 
 function LIBMPV_CLIENT_API_VERSION: Integer;
 begin
-  Result := LIBMPV_MAKE_VERSION(2, 0);
+  Result := LIBMPV_MAKE_VERSION(2, 2);
 end;
 
 // -----------------------------------------------------------------------------
