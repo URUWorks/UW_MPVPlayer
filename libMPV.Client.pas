@@ -858,6 +858,8 @@ type
   type
     Pmpv_node_list = ^mpv_node_list;
     Pmpv_byte_array = ^mpv_byte_array;
+
+    Pmpv_node = ^mpv_node;
     mpv_node =  record
         u :  record
             case Integer of
@@ -899,11 +901,6 @@ type
     * (see mpv_node)
      }
 
-    Pmpv_node = ^mpv_node;
-
-    mpv_node_array =  array[0..100] of mpv_node;
-    Pmpv_node_array = ^mpv_node_array;
-
     mpv_node_list =  record
        {* Number of entries. Negative values are not allowed. }
         num : Longint;
@@ -917,7 +914,7 @@ type
          * If num > 0, values[0] to values[num-1] (inclusive) are valid.
          * Otherwise, this can be NULL.
           }
-        values : Pmpv_node_array;
+        values : Pmpv_node;
         {*
          * MPV_FORMAT_NODE_ARRAY:
          *  unused (typically NULL), access is not allowed

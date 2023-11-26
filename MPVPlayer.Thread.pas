@@ -41,7 +41,7 @@ type
   private
     procedure HandleEvent;
   protected
-    Procedure TerminatedSet; override;
+    procedure TerminatedSet; override;
   public
     FOwner : TMPVPlayerThreadEvent;
     Event  : PRtlEvent;

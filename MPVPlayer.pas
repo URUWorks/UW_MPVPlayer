@@ -80,7 +80,6 @@ type
     FAutoLoadSub    : Boolean;
     FKeepAspect     : Boolean;
     FSMPTEMode      : Boolean;
-    //FFPSIsInteger   : Boolean;
     FStartAtPosMs   : Integer;
     FFileName       : String;
     FMPVFileName    : String;
@@ -96,7 +95,7 @@ type
     FTextNode       : mpv_node;
     FTextNodeList   : mpv_node_list;
     FTextNodeKeys   : array of PChar;
-    FTextNodeValues : mpv_node_array;
+    FTextNodeValues : array of mpv_node;
 
     FOnStartFile: TNotifyEvent;            // Notification before playback start of a file (before the file is loaded).
     FOnEndFile: TMPVPlayerNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
@@ -139,6 +138,7 @@ type
     destructor Destroy; override;
 
     function IsLibMPVAvailable: Boolean;
+
     function mpv_command_(args: array of const): mpv_error;
     function mpv_command_node_(ANode: mpv_node): mpv_error;
     procedure mpv_set_option_string_(const AValue: String);
@@ -540,7 +540,6 @@ begin
   FAutoLoadSub   := False;
   FKeepAspect    := True;
   FSMPTEMode     := False;
-  //FFPSIsInteger  := False;
   FFileName      := '';
   {$IFDEF LINUX}
   FMPVFileName   := '';
@@ -687,6 +686,7 @@ begin
   // Node text overlay cfg
   FText := '';
   SetLength(FTextNodeKeys, 4);
+  SetLength(FTextNodeValues, 4);
   FTextNodeKeys[0]             := 'name';
   FTextNodeValues[0].format    := MPV_FORMAT_STRING;
   FTextNodeValues[0].u._string := 'osd-overlay';
@@ -733,6 +733,7 @@ begin
 
   FText := '';
   SetLength(FTextNodeKeys, 0);
+  SetLength(FTextNodeValues, 0);
 
   if Assigned(FMPVEvent) then
   begin
@@ -750,7 +751,6 @@ begin
   FMPV_HANDLE := NIL;
   SetLength(FTrackList, 0);
   FFileName := '';
-  //FFPSIsInteger := False;
   FInitialized  := False;
   {$IFDEF DARWIN}
   Free_libMPV;
@@ -986,7 +986,7 @@ var
   i: Double;
 begin
   i := mpv_get_property_double('time-pos') * 1000.0;
-  if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
+  if FSMPTEMode then
     Result := Round(i / 1.001)
   else
     Result := Round(i);
@@ -999,7 +999,7 @@ var
   i: Double;
 begin
   i := AValue / 1000.0;
-  if FSMPTEMode then //if FSMPTEMode and FFPSIsInteger then
+  if FSMPTEMode then
     mpv_set_property_double('time-pos', i * 1.001)
   else
     mpv_set_property_double('time-pos', i);
@@ -1117,7 +1117,8 @@ end;
 procedure TMPVPlayer.GetTracks;
 var
   i, j: integer;
-  Node, Map, Detail: mpv_node;
+  Node: mpv_node;
+  Values, Detail: Pmpv_node;
   Keys: PPChar;
   Key, Value: String;
 begin
@@ -1127,46 +1128,60 @@ begin
   if FError = MPV_ERROR_SUCCESS then
   begin
     try
+      Values := Node.u.list^.values;
       SetLength(FTrackList, Node.u.list^.num);
-      for i := 0 to Node.u.list^.num -1 do
+
+      if Values <> NIL then
       begin
-        map  := Node.u.list^.values^[i];
-        Keys := map.u.list^.keys;
-        FillByte(FTrackList[i], SizeOf(TMPVPlayerTrackInfo), 0);
-
-        for j := 0 to map.u.list^.num -1 do
+        for i := 0 to Node.u.list^.num-1 do
         begin
-          Detail := map.u.list^.values^[j];
-          Key    := StrPas(Keys^);
+          Keys := Values^.u.list^.keys;
+          FillByte(FTrackList[i], SizeOf(TMPVPlayerTrackInfo), 0);
 
-          if Key = 'id' then
-            FTrackList[i].Id := Detail.u.int64_
-          else if Key = 'type' then
+          if Values <> NIL then
           begin
-            Value := StrPas(Detail.u._string);
-            if Value = 'audio' then
-              FTrackList[i].Kind := ttAudio
-            else if Value = 'video' then
-              FTrackList[i].Kind := ttVideo
-            else if Value = 'sub' then
-              FTrackList[i].Kind := ttSubtitle
-            else
-              FTrackList[i].Kind := ttUnknown;
-          end
-          else if Key = 'title' then
-            FTrackList[i].title := StrPas(Detail.u._string)
-          else if Key = 'lang' then
-            FTrackList[i].Lang := StrPas(Detail.u._string)
-          else if Key = 'codec' then
-            FTrackList[i].Codec := StrPas(Detail.u._string)
-          else if Key = 'decoder-desc' then
-            FTrackList[i].Decoder := StrPas(Detail.u._string)
-          else if Key = 'demux-channels' then
-            FTrackList[i].Channels := StrPas(Detail.u._string)
-          else if Key = 'selected' then
-            FTrackList[i].Selected := Detail.u.flag = 1;
+            Detail := Values^.u.list^.values;
 
-          Inc(Keys);
+            for j := 0 to Values^.u.list^.num-1 do
+              if Keys <> NIL then
+              begin
+                Key := StrPas(Keys^);
+
+                if Detail <> NIL then
+                begin
+                  if Key = 'id' then
+                    FTrackList[i].Id := Detail^.u.int64_
+                  else if Key = 'type' then
+                  begin
+                    Value := StrPas(Detail^.u._string);
+                    if Value = 'audio' then
+                      FTrackList[i].Kind := ttAudio
+                    else if Value = 'video' then
+                      FTrackList[i].Kind := ttVideo
+                    else if Value = 'sub' then
+                      FTrackList[i].Kind := ttSubtitle
+                    else
+                      FTrackList[i].Kind := ttUnknown;
+                  end
+                  else if Key = 'title' then
+                    FTrackList[i].title := StrPas(Detail^.u._string)
+                  else if Key = 'lang' then
+                    FTrackList[i].Lang := StrPas(Detail^.u._string)
+                  else if Key = 'codec' then
+                    FTrackList[i].Codec := StrPas(Detail^.u._string)
+                  else if Key = 'decoder-desc' then
+                    FTrackList[i].Decoder := StrPas(Detail^.u._string)
+                  else if Key = 'demux-channels' then
+                    FTrackList[i].Channels := StrPas(Detail^.u._string)
+                  else if Key = 'selected' then
+                    FTrackList[i].Selected := Detail^.u.flag = 1;
+
+                  Inc(Detail);
+                end;
+                Inc(Keys);
+              end;
+            Inc(Values);
+          end;
         end;
       end;
     except
@@ -1371,8 +1386,6 @@ begin
         FLastPos       := -1;
         {$ENDIF}
 
-        //FFPSIsInteger := Frac(GetVideoFPS) = 0;
-
         if (FStartAtPosMs > 0) then
         begin
           SetMediaPosInMs(FStartAtPosMs);
@@ -1387,7 +1400,7 @@ begin
 
       MPV_EVENT_END_FILE:
       begin
-        if Assigned(OnEndFile) then OnEndFile(Sender, Integer(Event^.data^));
+        if Assigned(OnEndFile) then OnEndFile(Sender, Pmpv_event_end_file(Event^.data^)^.reason);
       end;
 
       MPV_EVENT_VIDEO_RECONFIG:
@@ -1406,20 +1419,23 @@ begin
       begin
         if (Pmpv_event_property(Event^.Data)^.Name = 'eof-reached') then
         begin
-          if Assigned(OnEndFile) and (GetMediaPosInMs >= GetMediaLenInMs) then
-            OnEndFile(Sender, 0);
+          if (Pmpv_event_property(Event^.Data)^.data <> NIL) and (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
+          begin
+            Pause;
+            if Assigned(OnEndFile) then OnEndFile(Sender, MPV_END_FILE_REASON_EOF);
+          end;
         end
         else if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
         begin
-          if Assigned(OnBuffering) then
-            OnBuffering(Sender, mpv_get_property_int64('cache-buffering-state'));
+          if Assigned(OnBuffering) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
+            OnBuffering(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
         end;
 
         {$IFNDEF USETIMER}
         if (Pmpv_event_property(Event^.Data)^.Name = 'playback-time') and (Pmpv_event_property(Event^.Data)^.format = MPV_FORMAT_INT64) then
         begin
-          if Assigned(OnTimeChanged) then
-            OnTimeChanged(Sender, GetMediaPosInMs);
+          if Assigned(OnTimeChanged) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
+            OnTimeChanged(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
         end;
         {$ENDIF}
       end;
