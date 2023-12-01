@@ -57,8 +57,9 @@ type
     FThread  : TMPVPlayerCustomThreadEvent;
     FOnEvent : TNotifyEvent;
   public
-    constructor Create;
+    constructor Create(CreateSuspended: Boolean = False);
     destructor Destroy; override;
+    procedure Start;
     procedure PushEvent;
     property OnEvent: TNotifyEvent read FOnEvent write FOnEvent;
   end;
@@ -76,8 +77,9 @@ implementation
 constructor TMPVPlayerCustomThreadEvent.Create(AOwner: TMPVPlayerThreadEvent);
 begin
   inherited Create(True);
-  FOwner   := AOwner;
-  Event    := RTLEventCreate;
+  FreeOnTerminate := True;
+  FOwner := AOwner;
+  Event := RTLEventCreate;
 end;
 
 // -----------------------------------------------------------------------------
@@ -114,7 +116,7 @@ end;
 procedure TMPVPlayerCustomThreadEvent.HandleEvent;
 begin
   if Assigned(FOwner) and Assigned(FOwner.OnEvent) then
-   FOwner.OnEvent(FOwner);
+    FOwner.OnEvent(FOwner);
 end;
 
 // -----------------------------------------------------------------------------
@@ -123,12 +125,11 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerThreadEvent.Create;
+constructor TMPVPlayerThreadEvent.Create(CreateSuspended: Boolean = False);
 begin
   FOnEvent := NIL;
-  FThread  := TMPVPlayerCustomThreadEvent.Create(Self);
-  FThread.FreeOnTerminate := True;
-  FThread.Start;
+  FThread := TMPVPlayerCustomThreadEvent.Create(Self);
+  if not CreateSuspended then FThread.Start;
 end;
 
 // -----------------------------------------------------------------------------
@@ -143,10 +144,16 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVPlayerThreadEvent.Start;
+begin
+  if Assigned(FThread) and FThread.Suspended then FThread.Start;
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVPlayerThreadEvent.PushEvent;
 begin
-  if Assigned(FThread) then
-    RTLEventSetEvent(FThread.Event);
+  if Assigned(FThread) then RTLEventSetEvent(FThread.Event);
 end;
 
 // -----------------------------------------------------------------------------
