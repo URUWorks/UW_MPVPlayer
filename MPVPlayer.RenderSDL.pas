@@ -27,8 +27,7 @@ unit MPVPlayer.RenderSDL;
 interface
 
 uses
-  Classes, SysUtils, LCLType, sdl2lib, libMPV.Client, libMPV.Render,
-  libMPV.Render_gl, ctypes, MPVPlayer.Thread;
+  Classes, SysUtils, LCLType, sdl2lib, libMPV.Client, libMPV.Render;
 
 // -----------------------------------------------------------------------------
 
@@ -47,12 +46,11 @@ type
     mpvHandle        : Pmpv_handle;
     mpvRenderParams  : array of mpv_render_param;
     mpvUpdateParams  : array of mpv_render_param;
-    mpvOpenGLParams  : mpv_opengl_init_params;
     mpvRenderContext : pmpv_render_context;
-    mpvfbo           : mpv_opengl_fbo;
     sdlWindow        : PSDL_Window;
-    sdlGLContext     : TSDL_GLContext;
-    procedure Update_mpvfbo;
+    sdlRenderer      : PSDL_Renderer;
+    sdlTexture       : PSDL_Texture;
+    sdlTexSize       : array[0..1] of Integer;
   protected
     procedure TerminatedSet; override;
   public
@@ -90,13 +88,6 @@ implementation
 // -----------------------------------------------------------------------------
 
 { libmpv render wakeup_events }
-
-// -----------------------------------------------------------------------------
-
-function get_proc_address_mpv(ctx: Pointer; Name: PChar): Pointer; cdecl;
-begin
-  Result := SDL_GL_GetProcAddress(Name);
-end;
 
 // -----------------------------------------------------------------------------
 
@@ -163,7 +154,7 @@ begin
     end
     else
       while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
-        Synchronize(@InvalidateContext); //InvalidateContext;
+        InvalidateContext;
 
     RTLEventResetEvent(Event);
   end;
@@ -172,9 +163,6 @@ end;
 // -----------------------------------------------------------------------------
 
 function TMPVPlayerRenderThread.InitializeRenderContext: Boolean;
-const
-  SDL_HINT_VIDEO_FOREIGN_WINDOW_OPENGL = 'SDL_VIDEO_FOREIGN_WINDOW_OPENGL';
-
 begin
   Result := False;
 
@@ -186,7 +174,6 @@ begin
   if FError < 0 then // 0 on success and a negative error code on failure.
     Exit;
 
-  SDL_SetHint(SDL_HINT_VIDEO_FOREIGN_WINDOW_OPENGL, '1'); // Let SDL know that a foreign window will be used with OpenGL
   sdlWindow := SDL_CreateWindowFrom(Pointer(FHandle));
   if sdlWindow = NIL then // Failed to create SDL window
   begin
@@ -194,42 +181,39 @@ begin
     Exit;
   end;
 
-  sdlGLContext := SDL_GL_CreateContext(sdlWindow);
-  if @sdlGLContext = NIL then
+  sdlRenderer := SDL_CreateRenderer(sdlWindow, -1, 0);
+  if @sdlRenderer = NIL then
   begin
     FError := -3;
     Exit;
   end;
 
-  mpvOpenGLParams.get_proc_address := @get_proc_address_mpv;
-  mpvOpenGLParams.get_proc_address_ctx := NIL;
-
   // Initialize params
-  SetLength(mpvRenderParams, 4);
+  SetLength(mpvRenderParams, 3);
   mpvRenderParams[0]._type := MPV_RENDER_PARAM_API_TYPE;
-  mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_OPENGL);
-  mpvRenderParams[1]._type := MPV_RENDER_PARAM_OPENGL_INIT_PARAMS;
-  mpvRenderParams[1].Data  := @mpvOpenGLParams;
-  mpvRenderParams[2]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
-  mpvRenderParams[2].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
-  mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
-  mpvRenderParams[3].Data  := NIL;
+  mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_SW);
+  mpvRenderParams[1]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
+  mpvRenderParams[1].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
+  mpvRenderParams[2]._type := MPV_RENDER_PARAM_INVALID;
+  mpvRenderParams[2].Data  := NIL;
 
-  //SDL_GL_MakeCurrent(sdlWindow, sdlGLContext);
   FError := mpv_render_context_create(mpvRenderContext, mpvHandle^, Pmpv_render_param(@mpvRenderParams[0]));
   if FError <> MPV_ERROR_SUCCESS then Exit;
 
+  SetLength(mpvUpdateParams, 5);
+  mpvUpdateParams[0]._type := MPV_RENDER_PARAM_SW_SIZE;
+  mpvUpdateParams[1]._type := MPV_RENDER_PARAM_SW_FORMAT;
+  mpvUpdateParams[1].Data  := PChar('0bgr');
+  mpvUpdateParams[2]._type := MPV_RENDER_PARAM_SW_STRIDE;
+  mpvUpdateParams[3]._type := MPV_RENDER_PARAM_SW_POINTER;
+  mpvUpdateParams[4]._type := MPV_RENDER_PARAM_INVALID;
+  mpvUpdateParams[4].Data  := NIL;
+
   mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Owner);
 
-  // Update params
-  Update_mpvfbo;
-  SetLength(mpvUpdateParams, 3);
-  mpvUpdateParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
-  mpvUpdateParams[0].Data  := @mpvfbo;
-  mpvUpdateParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-  mpvUpdateParams[1].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
-  mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
-  mpvUpdateParams[2].Data  := NIL;
+  sdlTexture := NIL;
+  sdlTexSize[0] := 0;
+  sdlTexSize[1] := 0;
 
   IsRenderActive := True;
   Result := True;
@@ -247,7 +231,8 @@ begin
   if Assigned(mpv_render_context_free) and Assigned(mpvRenderContext) then
     mpv_render_context_free(mpvRenderContext^);
 
-  SDL_GL_DeleteContext(sdlGLContext);
+  SDL_DestroyTexture(sdlTexture);
+  SDL_DestroyRenderer(sdlRenderer);
   SDL_DestroyWindow(sdlWindow);
 
   SDL_Quit;
@@ -260,28 +245,34 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayerRenderThread.Update_mpvfbo;
+procedure TMPVPlayerRenderThread.InvalidateContext;
 var
   w, h : Integer;
+  pixels : Pointer;
+  pitch : size_t;
 begin
-  SDL_GetWindowSize(sdlWindow, @w, @h);
-  mpvfbo.internal_format := 0;
-  mpvfbo.fbo := 0;
-  mpvfbo.w   := w;
-  mpvfbo.h   := h;
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayerRenderThread.InvalidateContext;
-begin
-  Update_mpvfbo;
   if not Terminated and IsRenderActive then
   begin
-    //SDL_GL_MakeCurrent(sdlWindow, sdlGLContext);
-    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-    SDL_GL_SwapWindow(sdlWindow);
-    mpv_render_context_report_swap(mpvRenderContext^);
+    SDL_GetWindowSize(sdlWindow, @w, @h);
+    if not Assigned(sdlTexture) or (sdlTexSize[0] <> w) or (sdlTexSize[1] <> h) then
+    begin
+      SDL_DestroyTexture(sdlTexture);
+      sdlTexture := SDL_CreateTexture(sdlRenderer, SDL_PIXELFORMAT_RGBX8888, SDL_TEXTUREACCESS_STREAMING, w, h);
+      sdlTexSize[0] := w;
+      sdlTexSize[1] := h;
+    end;
+
+    SDL_LockTexture(sdlTexture, NIL, @pixels, @pitch);
+
+    mpvUpdateParams[0].Data := @sdlTexSize[0];
+    mpvUpdateParams[2].Data := @pitch;
+    mpvUpdateParams[3].Data := pixels;
+
+    FError := mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
+
+    SDL_UnlockTexture(sdlTexture);
+    SDL_RenderCopy(sdlRenderer, sdlTexture, NIL, NIL);
+    SDL_RenderPresent(sdlRenderer);
   end;
 end;
 
