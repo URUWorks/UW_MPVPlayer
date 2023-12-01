@@ -36,7 +36,8 @@ uses
   LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
   MPVPlayer.RenderGL, OpenGLContext
   {$IFDEF LINUX}, gtk2, gdk2x{$ENDIF}
-  {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF};
+  {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF}
+  {$IFDEF SDL2}, sdl2lib, libMPV.Render, MPVPlayer.RenderSDL{$ENDIF};
 
 // -----------------------------------------------------------------------------
 
@@ -44,7 +45,7 @@ type
 
   { TMPVPlayer Types }
 
-  TMPVPlayerRenderMode  = (rmEmbedding, rmOpenGL);
+  TMPVPlayerRenderMode  = (rmEmbedding, rmOpenGL{$IFDEF SDL2}, rmSDL2{$ENDIF});
   TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerLogLevel    = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
@@ -88,8 +89,13 @@ type
     FTimer          : TTimer;
     FLastPos        : Integer;
     {$ENDIF}
+
     FRenderMode     : TMPVPlayerRenderMode;
     FRenderGL       : TMPVPlayerRenderGL;
+
+    {$IFDEF SDL2}
+    FRenderSDL      : TMPVPlayerRenderSDL;
+    {$ENDIF}
 
     FText           : String;
     FTextNode       : mpv_node;
@@ -123,6 +129,13 @@ type
 
     procedure PushEvent;
     procedure ReceivedEvent(Sender: TObject);
+
+    {$IFDEF SDL2}
+    procedure InitializeRenderSDL;
+    procedure UnInitializeRenderSDL;
+    //procedure PushEvent_SDL;
+    //procedure ReceivedEvent_SDL(Sender: TObject);
+    {$ENDIF}
 
     procedure SetRenderMode(Value: TMPVPlayerRenderMode);
     function LogLevelToString: String;
@@ -643,7 +656,7 @@ begin
     sl.Assign(FStartOptions);
 
     if not FAutoStart then
-      sl.Add('pause');  // Start the player in paused state.
+      sl.Add('pause');  // Start the player in paused state
 
     if not FAutoLoadSub then
       sl.Add('sub=no'); // don't load subtitles
@@ -709,7 +722,11 @@ begin
   mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
 
   if FRenderMode = rmOpenGL then
-    InitializeRenderGL;
+    InitializeRenderGL
+  {$IFDEF SDL2}
+  else if FRenderMode = rmSDL2 then
+    InitializeRenderSDL
+  {$ENDIF};
 
   FInitialized := True;
   Result := True;
@@ -721,7 +738,7 @@ procedure TMPVPlayer.UnInitialize;
 begin
   if not FInitialized then Exit;
 
-  mpv_command_(['stop']);
+  mpv_command_(['stop']); //mpv_command_(['quit']);
 
   {$IFDEF USETIMER}
   FTimer.Enabled := False;
@@ -743,7 +760,11 @@ begin
   end;
 
   if FRenderMode = rmOpenGL then
-    UnInitializeRenderGL;
+    UnInitializeRenderGL
+  {$IFDEF SDL2}
+  else if FRenderMode = rmSDL2 then
+    UnInitializeRenderSDL
+  {$ENDIF};
 
   if Assigned(mpv_terminate_destroy) and Assigned(FMPV_HANDLE) then
     mpv_terminate_destroy(FMPV_HANDLE^);
@@ -776,7 +797,7 @@ end;
 
 procedure TMPVPlayer.UnInitializeRenderGL;
 begin
-  If Assigned(FRenderGL) then
+  if Assigned(FRenderGL) then
   begin
     FRenderGL.Free;
     FRenderGL := NIL;
@@ -789,6 +810,26 @@ begin
     Invalidate;
   end;
 end;
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF SDL2}
+procedure TMPVPlayer.InitializeRenderSDL;
+begin
+  FRenderSDL := TMPVPlayerRenderSDL.Create(MPVFileName, Handle, FMPV_HANDLE);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.UnInitializeRenderSDL;
+begin
+  if Assigned(FRenderSDL) then
+  begin
+    FRenderSDL.Free;
+    FRenderSDL := NIL;
+  end;
+end;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
@@ -1400,7 +1441,7 @@ begin
 
       MPV_EVENT_END_FILE:
       begin
-        if Assigned(OnEndFile) then OnEndFile(Sender, Pmpv_event_end_file(Event^.data^)^.reason);
+        if Assigned(OnEndFile) then OnEndFile(Sender, Pmpv_event_end_file(Event^.data)^.reason);
       end;
 
       MPV_EVENT_VIDEO_RECONFIG:
@@ -1442,6 +1483,79 @@ begin
     end;
   end;
 end;
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF SDL22}
+procedure TMPVPlayer.PushEvent_SDL;
+begin
+  if Assigned(sdlEvent) then sdlEvent.PushEvent;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ReceivedEvent_SDL(Sender: TObject);
+var
+  Event  : PSDL_Event;
+  mpvfbo : mpv_opengl_fbo;
+  redraw : Boolean;
+  flags  : uint64;
+  params : array of mpv_render_param;
+begin
+  SetLength(params, 3);
+  redraw := False;
+  New(Event);
+  try
+    while SDL_WaitEvent(Event) = 1 do
+    begin
+      case Event^.type_ of
+        SDL_QUITEV:
+        begin
+          UnInitialize;
+          Break;
+        end;
+
+        SDL_WINDOWEVENT:
+        begin
+          if Event^.type_ = SDL_WINDOWEVENT_EXPOSED then // Window has been exposed and should be redrawn
+            redraw := True
+          else
+            Break;
+        end;
+      else
+        if Event^.type_ = sdlRenderEventId then // Happens when there is new work for the render thread (such as rendering a new video frame or redrawing it).
+        begin
+          flags := mpv_render_context_update(mpvRenderContext^);
+          if (flags and MPV_RENDER_UPDATE_FRAME) <> 0 then
+            redraw := True;
+        end;
+      end;
+
+      if redraw then // redraw sdl window
+      begin
+        mpvfbo.fbo := 0;
+        mpvfbo.w   := Self.Width;
+        mpvfbo.h   := Self.Height;
+
+        params[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
+        params[0].Data  := @mpvfbo;
+        params[1]._type := MPV_RENDER_PARAM_FLIP_Y;
+        params[1].Data  := @glFlip;
+        params[2]._type := MPV_RENDER_PARAM_INVALID;
+        params[2].Data  := NIL;
+
+        mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@params[0]));
+        SDL_GL_SwapWindow(sdlWindow);
+
+        Break;
+      end;
+    end;
+  finally
+    Dispose(Event);
+    SetLength(params, 0);
+  end;
+end;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
