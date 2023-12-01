@@ -312,6 +312,8 @@ const
        * Type: int*: 0 for disable (default), 1 for enable
         }
   MPV_RENDER_PARAM_ADVANCED_CONTROL = 10;
+  MPV_RENDER_PARAM_ADVANCED_CONTROL_DISABLED : Longint = 0;
+  MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED : Longint = 1;
   {*
        * Return information about the next frame to render. Valid for
        * mpv_render_context_get_info().
@@ -769,6 +771,7 @@ var
 
 procedure Free_libMPV_Render;
 function Load_libMPV_Render(const AFileName: String = ''): Boolean;
+function Is_libMPV_Render_Loaded: Boolean;
 
 // -----------------------------------------------------------------------------
 
@@ -804,6 +807,8 @@ end;
 
 function Load_libMPV_Render(const AFileName: String = ''): Boolean;
 begin
+  if Is_libMPV_Render_Loaded then Exit(True);
+
   Result := False;
 
   if AFileName.IsEmpty then
@@ -822,20 +827,28 @@ begin
   Pointer(mpv_render_context_report_swap) := GetProcAddress(hLib,'mpv_render_context_report_swap');
   Pointer(mpv_render_context_free) := GetProcAddress(hLib,'mpv_render_context_free');
 
-  if not Assigned(mpv_render_context_create) or
-     not Assigned(mpv_render_context_set_parameter) or
-     not Assigned(mpv_render_context_get_info) or
-     not Assigned(mpv_render_context_set_update_callback) or
-     not Assigned(mpv_render_context_update) or
-     not Assigned(mpv_render_context_render) or
-     not Assigned(mpv_render_context_report_swap) or
-     not Assigned(mpv_render_context_free) then
+  if not Is_libMPV_Render_Loaded then
   begin
     Free_libMPV_Render;
     Exit;
   end;
 
   Result := True;
+end;
+
+// -----------------------------------------------------------------------------
+
+function Is_libMPV_Render_Loaded: Boolean;
+begin
+  Result := (hLib <> dynlibs.NilHandle) and
+    Assigned(mpv_render_context_create) and
+    Assigned(mpv_render_context_set_parameter) and
+    Assigned(mpv_render_context_get_info) and
+    Assigned(mpv_render_context_set_update_callback) and
+    Assigned(mpv_render_context_update) and
+    Assigned(mpv_render_context_render) and
+    Assigned(mpv_render_context_report_swap) and
+    Assigned(mpv_render_context_free);
 end;
 
 // -----------------------------------------------------------------------------
