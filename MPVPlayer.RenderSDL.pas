@@ -184,7 +184,7 @@ begin
   sdlRenderer := SDL_CreateRenderer(sdlWindow, -1, 0);
   if @sdlRenderer = NIL then
   begin
-    FError := -3;
+    FError := -2;
     Exit;
   end;
 

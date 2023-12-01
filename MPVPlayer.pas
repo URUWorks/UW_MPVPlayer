@@ -133,8 +133,6 @@ type
     {$IFDEF SDL2}
     procedure InitializeRenderSDL;
     procedure UnInitializeRenderSDL;
-    //procedure PushEvent_SDL;
-    //procedure ReceivedEvent_SDL(Sender: TObject);
     {$ENDIF}
 
     procedure SetRenderMode(Value: TMPVPlayerRenderMode);
@@ -1483,79 +1481,6 @@ begin
     end;
   end;
 end;
-
-// -----------------------------------------------------------------------------
-
-{$IFDEF SDL22}
-procedure TMPVPlayer.PushEvent_SDL;
-begin
-  if Assigned(sdlEvent) then sdlEvent.PushEvent;
-end;
-
-// -----------------------------------------------------------------------------
-
-procedure TMPVPlayer.ReceivedEvent_SDL(Sender: TObject);
-var
-  Event  : PSDL_Event;
-  mpvfbo : mpv_opengl_fbo;
-  redraw : Boolean;
-  flags  : uint64;
-  params : array of mpv_render_param;
-begin
-  SetLength(params, 3);
-  redraw := False;
-  New(Event);
-  try
-    while SDL_WaitEvent(Event) = 1 do
-    begin
-      case Event^.type_ of
-        SDL_QUITEV:
-        begin
-          UnInitialize;
-          Break;
-        end;
-
-        SDL_WINDOWEVENT:
-        begin
-          if Event^.type_ = SDL_WINDOWEVENT_EXPOSED then // Window has been exposed and should be redrawn
-            redraw := True
-          else
-            Break;
-        end;
-      else
-        if Event^.type_ = sdlRenderEventId then // Happens when there is new work for the render thread (such as rendering a new video frame or redrawing it).
-        begin
-          flags := mpv_render_context_update(mpvRenderContext^);
-          if (flags and MPV_RENDER_UPDATE_FRAME) <> 0 then
-            redraw := True;
-        end;
-      end;
-
-      if redraw then // redraw sdl window
-      begin
-        mpvfbo.fbo := 0;
-        mpvfbo.w   := Self.Width;
-        mpvfbo.h   := Self.Height;
-
-        params[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
-        params[0].Data  := @mpvfbo;
-        params[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-        params[1].Data  := @glFlip;
-        params[2]._type := MPV_RENDER_PARAM_INVALID;
-        params[2].Data  := NIL;
-
-        mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@params[0]));
-        SDL_GL_SwapWindow(sdlWindow);
-
-        Break;
-      end;
-    end;
-  finally
-    Dispose(Event);
-    SetLength(params, 0);
-  end;
-end;
-{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
