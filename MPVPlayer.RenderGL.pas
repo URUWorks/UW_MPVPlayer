@@ -59,10 +59,10 @@ type
   protected
     procedure TerminatedSet; override;
   public
-    Owner: TMPVPlayerRenderGL;
-    Event: PRtlEvent;
-    IsRenderActive: Boolean;
-    ForceInvalidateContext: Boolean;
+    Owner : TMPVPlayerRenderGL;
+    Event : PRTLEvent;
+    IsRenderActive : Boolean;
+    ForceInvalidateContext : Boolean;
     {$IFDEF BGLCONTROLS}
     FDrawCallback: TMPVPlayerDrawEvent;
     {$ENDIF}
@@ -76,23 +76,20 @@ type
 
   TMPVPlayerRenderGL = class
   private
-    FThread: TMPVPlayerRenderThread;
+    FThread : TMPVPlayerRenderThread;
     function GetRenderActive: Boolean;
     procedure SetRenderActive(const AValue: Boolean);
   public
     constructor Create(AMPVFileName: String; AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Render(const ForceInvalidate: Boolean = False);
-    property Active: Boolean read GetRenderActive write SetRenderActive;
+
+    property Active : Boolean read GetRenderActive write SetRenderActive;
   end;
 
 // -----------------------------------------------------------------------------
 
 implementation
-
-const
-  glEnabled  : Longint = 1;
-  glDisabled : Longint = 0;
 
 // -----------------------------------------------------------------------------
 
@@ -126,6 +123,7 @@ begin
   inherited Create(True);
 
   FreeOnTerminate := True;
+
   Event     := RTLEventCreate;
   Owner     := AOwner;
   mpvHandle := AHandle;
@@ -207,7 +205,7 @@ begin
   mpvRenderParams[1]._type := MPV_RENDER_PARAM_OPENGL_INIT_PARAMS;
   mpvRenderParams[1].Data  := @mpvOpenGLParams;
   mpvRenderParams[2]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
-  mpvRenderParams[2].Data  := @glEnabled;
+  mpvRenderParams[2].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
   mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
   mpvRenderParams[3].Data  := NIL;
 
@@ -223,7 +221,7 @@ begin
   mpvUpdateParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
   mpvUpdateParams[0].Data  := @mpvfbo;
   mpvUpdateParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-  mpvUpdateParams[1].Data  := @glEnabled;
+  mpvUpdateParams[1].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
   mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
   mpvUpdateParams[2].Data  := NIL;
 
@@ -259,8 +257,6 @@ end;
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayerRenderThread.InvalidateContext;
-{$IFDEF BGLCONTROLS}
-{$ENDIF}
 begin
   Update_mpvfbo;
   if not Terminated and IsRenderActive then
