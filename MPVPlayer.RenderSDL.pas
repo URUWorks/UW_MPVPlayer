@@ -51,6 +51,7 @@ type
     sdlRenderer      : PSDL_Renderer;
     sdlTexture       : PSDL_Texture;
     sdlTexSize       : array[0..1] of Integer;
+    procedure InvalidateContext;
   protected
     procedure TerminatedSet; override;
   public
@@ -61,8 +62,6 @@ type
     constructor Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle; AOwner: TMPVPlayerRenderSDL);
     destructor Destroy; override;
     procedure Execute; override;
-    procedure InvalidateContext;
-
     function InitializeRenderContext: Boolean;
     procedure UnInitializeRenderContext;
   end;
@@ -108,15 +107,13 @@ begin
 
   FreeOnTerminate := True;
 
-  Event     := RTLEventCreate;
-  FHandle   := ACtrlHandle;
+  Event := RTLEventCreate;
+  FHandle := ACtrlHandle;
   mpvHandle := AMPVHandle;
-  Owner     := AOwner;
-
-  IsRenderActive         := False;
+  Owner := AOwner;
+  mpvRenderContext := NIL;
+  IsRenderActive := False;
   ForceInvalidateContext := False;
-  mpvRenderParams        := NIL;
-  mpvUpdateParams        := NIL;
 end;
 
 // -----------------------------------------------------------------------------
@@ -126,6 +123,7 @@ begin
   UnInitializeRenderContext;
   RTLEventDestroy(Event);
   Owner := NIL;
+
   inherited Destroy;
 end;
 
@@ -136,6 +134,7 @@ begin
   IsRenderActive := False;
   ForceInvalidateContext := False;
   if Assigned(Event) then RTLEventSetEvent(Event);
+
   inherited TerminatedSet;
 end;
 
@@ -226,10 +225,10 @@ begin
   IsRenderActive := False;
 
   if Assigned(mpvRenderContext) then
+  begin
     mpv_render_context_set_update_callback(mpvRenderContext^, NIL, NIL);
-
-  if Assigned(mpv_render_context_free) and Assigned(mpvRenderContext) then
     mpv_render_context_free(mpvRenderContext^);
+  end;
 
   SDL_DestroyTexture(sdlTexture);
   SDL_DestroyRenderer(sdlRenderer);

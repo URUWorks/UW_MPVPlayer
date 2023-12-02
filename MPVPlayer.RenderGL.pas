@@ -135,8 +135,7 @@ begin
 
   IsRenderActive         := False;
   ForceInvalidateContext := False;
-  mpvRenderParams        := NIL;
-  mpvUpdateParams        := NIL;
+  mpvRenderContext       := NIL;
 end;
 
 // -----------------------------------------------------------------------------
@@ -146,6 +145,7 @@ begin
   UnInitializeRenderContext;
   RTLEventDestroy(Event);
   Owner := NIL;
+
   inherited Destroy;
 end;
 
@@ -156,6 +156,7 @@ begin
   IsRenderActive := False;
   ForceInvalidateContext := False;
   if Assigned(Event) then RTLEventSetEvent(Event);
+
   inherited TerminatedSet;
 end;
 
@@ -169,7 +170,7 @@ begin
     Exit;
   end;
 
-  while not Terminated do
+  while not Terminated and IsRenderActive do
   begin
     RTLEventWaitFor(Event);
 
@@ -234,10 +235,10 @@ end;
 procedure TMPVPlayerRenderThread.UnInitializeRenderContext;
 begin
   if Assigned(mpvRenderContext) then
+  begin
     mpv_render_context_set_update_callback(mpvRenderContext^, NIL, NIL);
-
-  if Assigned(mpv_render_context_free) and Assigned(mpvRenderContext) then
     mpv_render_context_free(mpvRenderContext^);
+  end;
 
   SetLength(mpvRenderParams, 0);
   SetLength(mpvUpdateParams, 0);
