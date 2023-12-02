@@ -45,11 +45,14 @@ type
 
   { TMPVPlayer Types }
 
-  TMPVPlayerRenderMode  = (rmEmbedding, rmOpenGL{$IFDEF SDL2}, rmSDL2{$ENDIF});
-  TMPVPlayerTrackType   = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
-  TMPVPlayerLogLevel    = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
-  TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
-  TMPVPlayerLogEvent    = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
+  TMPVPlayerRenderMode        = (rmEmbedding, rmOpenGL{$IFDEF SDL2}, rmSDL2{$ENDIF});
+  TMPVPlayerTrackType         = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
+  TMPVPlayerLogLevel          = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
+  TMPVPlayerNotifyEvent       = procedure(ASender: TObject; AParam: Integer) of object;
+  TMPVPlayerLogEvent          = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
+  TMPVPlayerGetReplyEvent     = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error; event_property: Pmpv_event_property) of object;
+  TMPVPlayerSetReplyEvent     = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error) of object;
+  TMPVPlayerCommandReplyEvent = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error; event_command: Pmpv_event_command) of object;
 
   TMPVPlayerTrackInfo = record
     Kind     : TMPVPlayerTrackType;
@@ -103,19 +106,22 @@ type
     FTextNodeKeys   : array of PChar;
     FTextNodeValues : array of mpv_node;
 
-    FOnStartFile: TNotifyEvent;            // Notification before playback start of a file (before the file is loaded).
-    FOnEndFile: TMPVPlayerNotifyEvent;     // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
-    FOnFileLoaded: TNotifyEvent;           // Notification when the file has been loaded (headers were read etc.)
-    FOnVideoReconfig: TNotifyEvent;        // Happens after video changed in some way.
-    FOnAudioReconfig: TNotifyEvent;        // Similar to VIDEO_RECONFIG.
-    FOnSeek: TMPVPlayerNotifyEvent;        // Happens when a seek was initiated.
-    FOnPlaybackRestart: TNotifyEvent;      // Usually happens on start of playback and after seeking.
-    FOnPlay: TNotifyEvent;                 // Play by user
-    FOnStop: TNotifyEvent;                 // Stop by user
-    FOnPause: TNotifyEvent;                // Pause by user
-    FOnTimeChanged: TMPVPlayerNotifyEvent; // Notify playback time, AParam is current position.
-    FOnBuffering: TMPVPlayerNotifyEvent;   // Whether playback is paused because of waiting for the cache.
-    FOnLogMessage: TMPVPlayerLogEvent;     // Receives messages enabled with mpv_request_log_messages().
+    FOnStartFile: TNotifyEvent;                        // Notification before playback start of a file (before the file is loaded).
+    FOnEndFile: TMPVPlayerNotifyEvent;                 // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
+    FOnFileLoaded: TNotifyEvent;                       // Notification when the file has been loaded (headers were read etc.)
+    FOnVideoReconfig: TNotifyEvent;                    // Happens after video changed in some way.
+    FOnAudioReconfig: TNotifyEvent;                    // Similar to VIDEO_RECONFIG.
+    FOnSeek: TMPVPlayerNotifyEvent;                    // Happens when a seek was initiated.
+    FOnPlaybackRestart: TNotifyEvent;                  // Usually happens on start of playback and after seeking.
+    FOnPlay: TNotifyEvent;                             // Play by user
+    FOnStop: TNotifyEvent;                             // Stop by user
+    FOnPause: TNotifyEvent;                            // Pause by user
+    FOnTimeChanged: TMPVPlayerNotifyEvent;             // Notify playback time, AParam is current position.
+    FOnBuffering: TMPVPlayerNotifyEvent;               // Whether playback is paused because of waiting for the cache.
+    FOnLogMessage: TMPVPlayerLogEvent;                 // Receives messages enabled with mpv_request_log_messages().
+    FOnGetReplyEvent: TMPVPlayerGetReplyEvent;         // Result data of mpv_get_property_* async.
+    FOnSetReplyEvent: TMPVPlayerSetReplyEvent;         // Result data of mpv_set_property_* async.
+    FOnCommandReplyEvent: TMPVPlayerCommandReplyEvent; // Result data of the command async.
 
     {$IFDEF BGLCONTROLS}
     FOnDrawEvent: TMPVPlayerDrawEvent;
@@ -150,15 +156,16 @@ type
 
     function IsLibMPVAvailable: Boolean;
 
-    function mpv_command_(args: array of const): mpv_error;
-    function mpv_command_node_(ANode: mpv_node): mpv_error;
+    function mpv_command_(args: array of const; const reply_userdata: Integer = 0): mpv_error; // if reply_userdata > 0 commands are executed asynchronously
+    function mpv_command_node_(ANode: mpv_node; const reply_userdata: Integer = 0): mpv_error;
+    procedure mpv_abort_async_command_(const reply_userdata: Integer);
     procedure mpv_set_option_string_(const AValue: String);
-    function mpv_get_property_boolean(const APropertyName: String): Boolean;
-    procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
-    function mpv_get_property_double(const AProperty: String): Double;
-    procedure mpv_set_property_double(const AProperty: String; const AValue: Double);
-    function mpv_get_property_int64(const AProperty: String): Int64;
-    procedure mpv_set_property_int64(const AProperty: String; const AValue: Int64);
+    function mpv_get_property_boolean(const APropertyName: String; const reply_userdata: Integer = 0): Boolean;
+    procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean; const reply_userdata: Integer = 0);
+    function mpv_get_property_double(const AProperty: String; const reply_userdata: Integer = 0): Double;
+    procedure mpv_set_property_double(const AProperty: String; const AValue: Double; const reply_userdata: Integer = 0);
+    function mpv_get_property_int64(const AProperty: String; const reply_userdata: Integer = 0): Int64;
+    procedure mpv_set_property_int64(const AProperty: String; const AValue: Int64; const reply_userdata: Integer = 0);
     procedure mpv_set_pause(const Value: Boolean);
 
     function GetErrorString: String;
@@ -305,6 +312,9 @@ type
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
     property OnBuffering: TMPVPlayerNotifyEvent read FOnBuffering write FOnBuffering;
     property OnLogMessage: TMPVPlayerLogEvent read FOnLogMessage write FOnLogMessage;
+    property OnGetReplyEvent: TMPVPlayerGetReplyEvent read FOnGetReplyEvent write FOnGetReplyEvent;
+    property OnSetReplyEvent: TMPVPlayerSetReplyEvent read FOnSetReplyEvent write FOnSetReplyEvent;
+    property OnCommandReplyEvent: TMPVPlayerCommandReplyEvent read FOnCommandReplyEvent write FOnCommandReplyEvent;
 
     {$IFDEF BGLCONTROLS}
     property OnDraw: TMPVPlayerDrawEvent read FOnDrawEvent write FOnDrawEvent;
@@ -340,7 +350,7 @@ var
   h, m, x: Integer;
 begin
   Hour  := Trunc(Time / 3600000);
-  h     := Time - (Hour*3600000);
+  h     := Time - (Hour * 3600000);
   Min   := Trunc(h / 60000);
   m     := Min * 60000;
   x     := h - m;
@@ -370,7 +380,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_command_(args: array of const): mpv_error;
+function TMPVPlayer.mpv_command_(args: array of const; const reply_userdata: Integer = 0): mpv_error;
 var
   pArgs: array of PChar;
   i: Integer;
@@ -399,7 +409,11 @@ begin
 
     pArgs[High(Args)+2] := NIL;
 
-    FError := mpv_command(FMPV_HANDLE^, PPChar(@pArgs[0]));
+    if reply_userdata > 0 then
+      FError := mpv_command_async(FMPV_HANDLE^, reply_userdata, PPChar(@pArgs[0]))
+    else
+      FError := mpv_command(FMPV_HANDLE^, PPChar(@pArgs[0]));
+
     SetLength(pArgs, 0);
   end
   else
@@ -410,16 +424,29 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_command_node_(ANode: mpv_node): mpv_error;
+function TMPVPlayer.mpv_command_node_(ANode: mpv_node; const reply_userdata: Integer = 0): mpv_error;
 var
   Res: mpv_node;
 begin
   FError := MPV_ERROR_UNINITIALIZED;
 
   if FInitialized and (FMPV_HANDLE <> NIL) then
-    FError := mpv_command_node(FMPV_HANDLE^, ANode, Res);
+  begin
+    if reply_userdata > 0 then
+      FError := mpv_command_node_async(FMPV_HANDLE^, reply_userdata, ANode)
+    else
+      FError := mpv_command_node(FMPV_HANDLE^, ANode, Res);
+  end;
 
   Result := FError;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.mpv_abort_async_command_(const reply_userdata: Integer);
+begin
+  if FInitialized and (FMPV_HANDLE <> NIL) then
+    mpv_abort_async_command(FMPV_HANDLE^, reply_userdata);
 end;
 
 // -----------------------------------------------------------------------------
@@ -448,19 +475,28 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_get_property_boolean(const APropertyName: String): Boolean;
+function TMPVPlayer.mpv_get_property_boolean(const APropertyName: String; const reply_userdata: Integer = 0): Boolean;
 var
   p: Integer;
 begin
   Result := False;
   if not FInitialized then Exit;
-  FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_FLAG, @p);
-  Result := Boolean(p);
+
+  if reply_userdata > 0 then
+  begin
+    FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_FLAG);
+    Result := True;
+  end
+  else
+  begin
+    FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_FLAG, @p);
+    Result := Boolean(p);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean);
+procedure TMPVPlayer.mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean; const reply_userdata: Integer = 0);
 var
   p: Integer;
 begin
@@ -471,43 +507,66 @@ begin
   else
     p := 0;
 
-  FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_FLAG, @p);
+  if reply_userdata > 0 then
+    FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_FLAG, @p)
+  else
+    FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_FLAG, @p);
 end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_get_property_double(const AProperty: String): Double;
+function TMPVPlayer.mpv_get_property_double(const AProperty: String; const reply_userdata: Integer = 0): Double;
 begin
   if FInitialized then
-    FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @Result)
+  begin
+    if reply_userdata > 0 then
+      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_DOUBLE)
+    else
+      FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @Result);
+  end
   else
     Result := 0;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_property_double(const AProperty: String; const AValue: Double);
+procedure TMPVPlayer.mpv_set_property_double(const AProperty: String; const AValue: Double; const reply_userdata: Integer = 0);
 begin
   if FInitialized then
-    FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue);
+  begin
+    if reply_userdata > 0 then
+      FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue)
+    else
+      FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_get_property_int64(const AProperty: String): Int64;
+function TMPVPlayer.mpv_get_property_int64(const AProperty: String; const reply_userdata: Integer = 0): Int64;
 begin
   if FInitialized then
-    FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @Result)
+  begin
+    if reply_userdata > 0 then
+      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_INT64)
+    else
+      FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @Result)
+  end
   else
     Result := 0;
 end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_property_int64(const AProperty: String; const AValue: Int64);
+procedure TMPVPlayer.mpv_set_property_int64(const AProperty: String; const AValue: Int64; const reply_userdata: Integer = 0);
 begin
   if FInitialized then
-    FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @AValue);
+  begin
+    if reply_userdata > 0 then
+      FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_INT64, @AValue)
+    else
+      FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @AValue);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -736,7 +795,7 @@ procedure TMPVPlayer.UnInitialize;
 begin
   if not FInitialized then Exit;
 
-  mpv_command_(['stop']); //mpv_command_(['quit']);
+  mpv_command_(['stop']);
 
   {$IFDEF USETIMER}
   FTimer.Enabled := False;
@@ -1399,13 +1458,7 @@ begin
     case (Event^.event_id) of
       MPV_EVENT_SHUTDOWN:
       begin
-        if (FRenderMode = rmOpenGL) and Assigned(FRenderGL) then
-          FRenderGL.Active := False;
-
-        {$IFDEF USETIMER}
-        FTimer.Enabled := False;
-        FLastPos       := -1;
-        {$ENDIF}
+        UnInitialize;
         Break;
       end;
 
@@ -1416,7 +1469,10 @@ begin
           Pmpv_event_log_message(Event^.Data)^.Text);
 
       MPV_EVENT_START_FILE:
-        if Assigned(OnStartFile) then OnStartFile(Sender);
+      begin
+        if Assigned(OnStartFile) then
+          OnStartFile(Sender);
+      end;
 
       MPV_EVENT_FILE_LOADED:
       begin
@@ -1435,23 +1491,47 @@ begin
       end;
 
       MPV_EVENT_SEEK:
-        if Assigned(OnSeek) then OnSeek(Sender, GetMediaPosInMs);
+      begin
+        if Assigned(OnSeek) then
+          OnSeek(Sender, GetMediaPosInMs);
+      end;
 
       MPV_EVENT_END_FILE:
       begin
-        if Assigned(OnEndFile) then OnEndFile(Sender, Pmpv_event_end_file(Event^.data)^.reason);
+        if Assigned(OnEndFile) then
+          OnEndFile(Sender, Pmpv_event_end_file(Event^.data)^.reason);
       end;
 
       MPV_EVENT_VIDEO_RECONFIG:
       begin
         GetTracks;
-        if Assigned(OnVideoReconfig) then OnVideoReconfig(Sender);
+        if Assigned(OnVideoReconfig) then
+          OnVideoReconfig(Sender);
       end;
 
       MPV_EVENT_AUDIO_RECONFIG:
       begin
         GetTracks;
-        if Assigned(OnAudioReconfig) then OnAudioReconfig(Sender);
+        if Assigned(OnAudioReconfig) then
+          OnAudioReconfig(Sender);
+      end;
+
+      MPV_EVENT_GET_PROPERTY_REPLY:
+      begin
+        if Assigned(OnGetReplyEvent) then
+          OnGetReplyEvent(Sender, Event^.reply_userdata, Event^.error, Pmpv_event_property(Event^.Data));
+      end;
+
+      MPV_EVENT_SET_PROPERTY_REPLY:
+      begin
+        if Assigned(OnSetReplyEvent) then
+          OnSetReplyEvent(Sender, Event^.reply_userdata, Event^.error);
+      end;
+
+      MPV_EVENT_COMMAND_REPLY:
+      begin
+        if Assigned(OnCommandReplyEvent) then
+          OnCommandReplyEvent(Sender, Event^.reply_userdata, Event^.error, Pmpv_event_command(Event^.Data));
       end;
 
       MPV_EVENT_PROPERTY_CHANGE:
