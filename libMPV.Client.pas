@@ -1113,7 +1113,7 @@ type
    * @return error code (if parsing or queuing the command fails)
     }
 
-  mpv_command_node_async : function(var ctx:mpv_handle; reply_userdata:uint64; var args:mpv_node):cint;cdecl;
+  mpv_command_node_async : function(var ctx:mpv_handle; reply_userdata:uint64; args:mpv_node):cint;cdecl;
 
   {*
    * Signal to all async requests with the matching ID to abort. This affects
@@ -1217,7 +1217,7 @@ type
    * @return error code if sending the request failed
     }
 
-  mpv_set_property_async : function(var ctx:mpv_handle; reply_userdata:cuint64; name:Pchar; format:mpv_format; var data:pointer):longint;cdecl;
+  mpv_set_property_async : function(var ctx:mpv_handle; reply_userdata:cuint64; name:Pchar; format:mpv_format; data:pointer):longint;cdecl;
 
   {*
    * Read the value of the given property.
@@ -1540,7 +1540,7 @@ type
     mpv_event_name : function(event:mpv_event_id):Pchar;cdecl;
 
   type
-    pmpv_event_property = ^mpv_event_property;
+    Pmpv_event_property = ^mpv_event_property;
     mpv_event_property = record
         {*
          * Name of the property.
@@ -1652,7 +1652,7 @@ type
 
   type
     {/ Since API version 1.108. }
-    pmpv_event_start_file = ^_mpv_event_start_file;
+    Pmpv_event_start_file = ^_mpv_event_start_file;
     _mpv_event_start_file = record
         {*
          * Playlist entry ID of the file being loaded now.
@@ -1660,7 +1660,7 @@ type
         playlist_entry_id : int64;
       end;
 
-    pmpv_event_end_file = ^_mpv_event_end_file;
+    Pmpv_event_end_file = ^_mpv_event_end_file;
     _mpv_event_end_file = record
         {*
          * Corresponds to the values in enum mpv_end_file_reason.
@@ -1711,13 +1711,13 @@ type
        * None of the valid items are NULL.
         }
 
-    pmpv_event_client_message = ^_mpv_event_client_message;
+    Pmpv_event_client_message = ^_mpv_event_client_message;
     _mpv_event_client_message = record
         num_args : integer;
         args : PPchar;
       end;
 
-    pmpv_event_hook = ^_mpv_event_hook;
+    Pmpv_event_hook = ^_mpv_event_hook;
     _mpv_event_hook = record
         {*
          * The hook name as passed to mpv_hook_add().
@@ -1730,6 +1730,7 @@ type
       end;
 
   { Since API version 1.102. }
+    Pmpv_event_command = ^mpv_event_command;
     mpv_event_command = record
         {*
          * Result data of the command. Note that success/failure is signaled
