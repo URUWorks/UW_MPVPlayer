@@ -34,7 +34,7 @@ interface
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
   LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
-  MPVPlayer.RenderGL, OpenGLContext
+  MPVPlayer.RenderGL, OpenGLContext, MPVPlayer.Filters
   {$IFDEF LINUX}, gtk2, gdk2x{$ENDIF}
   {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF}
   {$IFDEF SDL2}, sdl2lib, libMPV.Render, MPVPlayer.RenderSDL{$ENDIF};
@@ -215,6 +215,12 @@ type
 
     procedure AddOption(const AValue: String);
     procedure RemoveOption(const AValue: String);
+
+    procedure SetVideoFilters(const AVideoFilters: TMPVPlayerVideoFilters);
+    procedure ClearVideoFilters;
+
+    procedure SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters);
+    procedure ClearAudioFilters;
 
     property mpv_handle    : Pmpv_handle         read FMPV_HANDLE;
     property Error         : mpv_error           read FError;
@@ -1615,6 +1621,70 @@ begin
   i := FStartOptions.IndexOfName(Copy(AValue, 1, Pos('=', AValue)));
   if i > -1 then
     FStartOptions.Delete(i);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetVideoFilters(const AVideoFilters: TMPVPlayerVideoFilters);
+var
+  vf : TMPVPlayerVideoFilter;
+  fn, fp, s : String;
+begin
+  s := '';
+  for vf in AVideoFilters do
+  begin
+    fn := TMPVPlayerVideoFiltersInfo[Integer(vf)].Name;
+    fp := TMPVPlayerVideoFiltersInfo[Integer(vf)].Params;
+
+    if s.IsEmpty then
+      s := fn
+    else
+      s += ',' + fn;
+
+    if not fp.IsEmpty then
+      s += '=' + fp;
+  end;
+
+  mpv_set_option_string_('vf=' + s);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ClearVideoFilters;
+begin
+  mpv_set_option_string_('vf=');
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters);
+var
+  af : TMPVPlayerAudioFilter;
+  fn, fp, s : String;
+begin
+  s := '';
+  for af in AAudioFilters do
+  begin
+    fn := TMPVPlayerAudioFiltersInfo[Integer(af)].Name;
+    fp := TMPVPlayerAudioFiltersInfo[Integer(af)].Params;
+
+    if s.IsEmpty then
+      s := fn
+    else
+      s += ',' + fn;
+
+    if not fp.IsEmpty then
+      s += '=' + fp;
+  end;
+
+  mpv_set_option_string_('af=' + s);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ClearAudioFilters;
+begin
+  mpv_set_option_string_('af=');
 end;
 
 // -----------------------------------------------------------------------------
