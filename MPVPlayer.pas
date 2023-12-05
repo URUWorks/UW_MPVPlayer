@@ -580,6 +580,10 @@ end;
 procedure TMPVPlayer.mpv_set_pause(const Value: Boolean);
 begin
   mpv_set_property_boolean('pause', Value);
+  case Value of
+    True  : if Assigned(FOnPause) then FOnPause(Self);
+    False : if Assigned(FOnPlay) then FOnPlay(Self);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -719,7 +723,7 @@ begin
     sl.Assign(FStartOptions);
 
     if not FAutoStart then
-      sl.Add('pause');  // Start the player in paused state
+      sl.Add('pause'); // Start the player in paused state
 
     if not FAutoLoadSub then
       sl.Add('sub=no'); // don't load subtitles
@@ -1020,10 +1024,7 @@ begin
   Loop(0, 0);
 
   if IsPlaying then
-  begin
-    mpv_set_pause(True);
-    if Assigned(FOnPause) then FOnPause(Self);
-  end
+    mpv_set_pause(True)
   else
     Resume(True);
 end;
@@ -1038,7 +1039,6 @@ begin
       SetMediaPosInMs(0);
 
     mpv_set_pause(False);
-    if Assigned(FOnPlay) then FOnPlay(Self);
   end;
 end;
 
@@ -1546,7 +1546,7 @@ begin
         begin
           if (Pmpv_event_property(Event^.Data)^.data <> NIL) and (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
           begin
-            Pause;
+            mpv_set_pause(True);
             if Assigned(OnEndFile) then OnEndFile(Sender, MPV_END_FILE_REASON_EOF);
           end;
         end
@@ -1652,7 +1652,7 @@ end;
 
 procedure TMPVPlayer.ClearVideoFilters;
 begin
-  mpv_set_option_string_('vf=');
+  SetVideoFilters([]);
 end;
 
 // -----------------------------------------------------------------------------
