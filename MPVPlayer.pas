@@ -1684,7 +1684,7 @@ end;
 
 procedure TMPVPlayer.ClearAudioFilters;
 begin
-  mpv_set_option_string_('af=');
+  SetAudioFilters([]);
 end;
 
 // -----------------------------------------------------------------------------
