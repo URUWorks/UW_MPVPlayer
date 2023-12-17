@@ -48,6 +48,7 @@ type
   TMPVPlayerRenderMode        = (rmEmbedding, rmOpenGL{$IFDEF SDL2}, rmSDL2{$ENDIF});
   TMPVPlayerTrackType         = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerLogLevel          = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
+  TMPVPlayerScreenshotMode    = (smSubtitles, smVideo, smWindow);
   TMPVPlayerNotifyEvent       = procedure(ASender: TObject; AParam: Integer) of object;
   TMPVPlayerLogEvent          = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
   TMPVPlayerGetReplyEvent     = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error; event_property: Pmpv_event_property) of object;
@@ -211,7 +212,7 @@ type
     function GetVideoTotalFrames: Integer;
     function GetVideoFPS: Double;
 
-    procedure ScreenshotToFile(const AFileName: String); // name with full path, extension defines the format (file.png)
+    procedure ScreenshotToFile(const AFileName: String; const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo); // name with full path, extension defines the format (file.png)
 
     procedure AddOption(const AValue: String);
     procedure RemoveOption(const AValue: String);
@@ -1438,9 +1439,18 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.ScreenshotToFile(const AFileName: String);
+procedure TMPVPlayer.ScreenshotToFile(const AFileName: String; const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
+var
+  ssm: String;
 begin
-  mpv_command_(['screenshot-to-file', AFileName]);
+  case AScreenshotMode of
+    smSubtitles : ssm := 'subtitles'; // Video and Subtitles
+    smWindow    : ssm := 'window'; // Video and all texts
+  else
+    ssm := 'video';  // Video only
+  end;
+
+  mpv_command_(['screenshot-to-file', AFileName, ssm]);
 end;
 
 // -----------------------------------------------------------------------------
