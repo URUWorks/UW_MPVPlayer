@@ -137,6 +137,7 @@ end;
 destructor TMPVPlayerThreadEvent.Destroy;
 begin
   FThread.Terminate;
+  FThread.WaitFor;
   FThread := NIL;
 
   inherited Destroy;
