@@ -77,7 +77,6 @@ implementation
 constructor TMPVPlayerCustomThreadEvent.Create(AOwner: TMPVPlayerThreadEvent);
 begin
   inherited Create(True);
-  FreeOnTerminate := True;
   FOwner := AOwner;
   Event := RTLEventCreate;
 end;
@@ -95,8 +94,8 @@ end;
 
 procedure TMPVPlayerCustomThreadEvent.TerminatedSet;
 begin
-  if Assigned(Event) then RTLEventSetEvent(Event);
   inherited TerminatedSet;
+  if Assigned(Event) then RTLEventSetEvent(Event);
 end;
 
 // -----------------------------------------------------------------------------
@@ -115,7 +114,7 @@ end;
 
 procedure TMPVPlayerCustomThreadEvent.HandleEvent;
 begin
-  if Assigned(FOwner) and Assigned(FOwner.OnEvent) then
+  if Assigned(FOwner) and Assigned(FOwner.OnEvent) and not Terminated then
     FOwner.OnEvent(FOwner);
 end;
 
@@ -137,7 +136,8 @@ end;
 destructor TMPVPlayerThreadEvent.Destroy;
 begin
   FThread.Terminate;
-  FThread.WaitFor;
+  //FThread.WaitFor;
+  FThread.Free;
   FThread := NIL;
 
   inherited Destroy;
