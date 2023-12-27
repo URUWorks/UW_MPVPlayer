@@ -136,7 +136,9 @@ end;
 destructor TMPVPlayerThreadEvent.Destroy;
 begin
   FThread.Terminate;
-  //FThread.WaitFor;
+  {$IFDEF DARWIN}
+  FThread.WaitFor;
+  {$ENDIF}
   FThread.Free;
   FThread := NIL;
 
