@@ -86,6 +86,7 @@ type
     FKeepAspect     : Boolean;
     FSMPTEMode      : Boolean;
     FStartAtPosMs   : Integer;
+    FPausePosMs     : Integer;
     FFileName       : String;
     FMPVFileName    : String;
     FYTDLPFileName  : String;
@@ -621,6 +622,7 @@ begin
   FAutoLoadSub   := False;
   FKeepAspect    := True;
   FSMPTEMode     := False;
+  FPausePosMs    := -1;
   FFileName      := '';
   {$IFDEF LINUX}
   FMPVFileName   := '';
@@ -796,6 +798,7 @@ begin
     InitializeRenderSDL
   {$ENDIF};
 
+  FPausePosMs := -1;
   FInitialized := True;
   Result := True;
 end;
@@ -840,7 +843,8 @@ begin
   FMPV_HANDLE := NIL;
   SetLength(FTrackList, 0);
   FFileName := '';
-  FInitialized  := False;
+  FPausePosMs := -1;
+  FInitialized := False;
   {$IFDEF DARWIN}
   Free_libMPV;
   {$ENDIF}
@@ -1039,6 +1043,7 @@ begin
     if GetMediaPosInMs = GetMediaLenInMs then
       SetMediaPosInMs(0);
 
+    FPausePosMs := -1;
     mpv_set_pause(False);
   end;
 end;
@@ -1052,6 +1057,7 @@ begin
   if not IsPaused then
     mpv_set_pause(True);
 
+  FPausePosMs := -1;
   SetMediaPosInMs(0);
   if Assigned(FOnStop) then FOnStop(Self);
 end;
@@ -1090,6 +1096,9 @@ function TMPVPlayer.GetMediaPosInMs: Integer;
 var
   i: Double;
 begin
+  if FPausePosMs > -1 then
+    Exit(FPausePosMs);
+
   i := mpv_get_property_double('time-pos') * 1000.0;
   if FSMPTEMode then
     Result := Round(i / 1.001)
@@ -1103,6 +1112,9 @@ procedure TMPVPlayer.SetMediaPosInMs(const AValue: Integer);
 var
   i: Double;
 begin
+  if IsPaused and (AValue <= GetMediaLenInMs) then
+    FPausePosMs := AValue;
+
   i := AValue / 1000.0;
   if FSMPTEMode then
     mpv_set_property_double('time-pos', i * 1.001)
@@ -1134,6 +1146,7 @@ begin
   end
   else
   begin
+    FPausePosMs := -1;
     if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and not IsPaused then
       if Assigned(FOnPause) then FOnPause(Self);
   end;
@@ -1153,6 +1166,7 @@ begin
   end
   else
   begin
+    FPausePosMs := -1;
     if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and IsPaused then
       if Assigned(FOnPause) then FOnPause(Self);
   end;
