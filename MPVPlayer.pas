@@ -102,6 +102,7 @@ type
     FRenderSDL      : TMPVPlayerRenderSDL;
     {$ENDIF}
 
+    FShowText       : String;
     FText           : String;
     FTextNode       : mpv_node;
     FTextNodeList   : mpv_node_list;
@@ -158,7 +159,7 @@ type
 
     function IsLibMPVAvailable: Boolean;
 
-    function mpv_command_(args: array of const; const reply_userdata: Integer = 0): mpv_error; // if reply_userdata > 0 commands are executed asynchronously
+    function mpv_command_(args: array of String; const reply_userdata: Integer = 0): mpv_error; // if reply_userdata > 0 commands are executed asynchronously
     function mpv_command_node_(ANode: mpv_node; const reply_userdata: Integer = 0): mpv_error;
     procedure mpv_abort_async_command_(const reply_userdata: Integer);
     procedure mpv_set_option_string_(const AValue: String);
@@ -202,7 +203,7 @@ type
     procedure RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
     procedure ReloadTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
     procedure ShowOverlayText(const AText: String);
-    procedure ShowText(const AText: String; const ATags: String = '{\an7}');
+    procedure ShowText(const AText: String; const ADuration: Integer = 1000; const ATags: String = '{\an7}');
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
     procedure SetTextVAlign(const AValue: String);
@@ -388,11 +389,10 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_command_(args: array of const; const reply_userdata: Integer = 0): mpv_error;
+function TMPVPlayer.mpv_command_(args: array of String; const reply_userdata: Integer = 0): mpv_error;
 var
   pArgs: array of PChar;
   i: Integer;
-  s: String;
 begin
   Result := MPV_ERROR_INVALID_PARAMETER;
 
@@ -400,22 +400,12 @@ begin
     Exit
   else if FInitialized and (mpv_command <> NIL) and (FMPV_HANDLE <> NIL) then
   begin
-    SetLength(pArgs, High(Args)+2);
+    SetLength(pArgs, (Length(Args)+1));
 
     for i := 0 to High(Args) do
-    begin
-      case Args[i].VType of
-        vtInteger    : s := IntToStr(Args[i].VInteger);
-        vtChar       : s := Args[i].VChar;
-        vtString     : s := Args[i].VString^;
-        vtPChar      : s := Args[i].VPChar;
-        vtAnsiString : s := AnsiString(Args[I].VAnsiString);
-      end;
+      pArgs[i] := PChar(Args[i]);
 
-      pArgs[i] := PChar(s);
-    end;
-
-    pArgs[High(Args)+2] := NIL;
+    pArgs[Length(Args)] := NIL;
 
     if reply_userdata > 0 then
       FError := mpv_command_async(FMPV_HANDLE^, reply_userdata, PPChar(@pArgs[0]))
@@ -654,16 +644,17 @@ begin
     Duplicates := dupIgnore;
 
 //    {$IFDEF WINDOWS}
-    Add('hwdec=no');             // fix some windows crash
+    Add('hwdec=no');              // fix some windows crash
 //    {$ELSE}
-//    Add('hwdec=auto');           // enable best hw decoder.
+//    Add('hwdec=auto');            // enable best hw decoder.
 //    {$ENDIF}
-    Add('keep-open=always');     // don't auto close video.
-    Add('vd-lavc-dr=no');        // fix possibles deadlock issues with OpenGL
-    Add('hr-seek=yes');          // use precise seeks whenever possible.
-    Add('hr-seek-framedrop=no'); // default: yes.
-    Add('seekbarkeyframes=no');  // default: yes.
-    Add('ytdl=yes');             // youtube
+//    Add('osd-duration=5000');     // default: 1000.
+    Add('keep-open=always');      // don't auto close video.
+    Add('vd-lavc-dr=no');         // fix possibles deadlock issues with OpenGL
+    Add('hr-seek=yes');           // use precise seeks whenever possible.
+    Add('hr-seek-framedrop=no');  // default: yes.
+    Add('seekbarkeyframes=no');   // default: yes.
+    Add('ytdl=yes');              // YouTube downloader
   end;
 
   {$IFDEF WINDOWS}
@@ -766,6 +757,8 @@ begin
 
   FError := mpv_request_log_messages(FMPV_HANDLE^, PChar(LogLevelToString));
 
+  // Show text string
+  FShowText := '';
   // Node text overlay cfg
   FText := '';
   SetLength(FTextNodeKeys, 4);
@@ -819,6 +812,7 @@ begin
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
 
+  FShowText := '';
   FText := '';
   SetLength(FTextNodeKeys, 0);
   SetLength(FTextNodeValues, 0);
@@ -1343,7 +1337,7 @@ begin
   end;
 
   if ID > -1 then
-    mpv_command_([s, ID])
+    mpv_command_([s, ID.ToString])
   else
     mpv_command_([s]);
 end;
@@ -1363,7 +1357,7 @@ begin
   end;
 
   if ID > -1 then
-    mpv_command_([s, ID])
+    mpv_command_([s, ID.ToString])
   else
     mpv_command_([s]);
 end;
@@ -1390,9 +1384,13 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.ShowText(const AText: String; const ATags: String = '{\an7}');
+procedure TMPVPlayer.ShowText(const AText: String; const ADuration: Integer = 1000; const ATags: String = '{\an7}');
 begin
-  mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + ATags + AText]);
+  if (AText <> FShowText) then
+  begin
+    FShowText := AText;
+    mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + ATags + AText, ADuration.ToString]);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
