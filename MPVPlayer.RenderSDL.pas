@@ -106,7 +106,6 @@ begin
   inherited Create(True);
 
   FreeOnTerminate := True;
-
   Event := RTLEventCreate;
   FHandle := ACtrlHandle;
   mpvHandle := AMPVHandle;

@@ -77,6 +77,8 @@ implementation
 constructor TMPVPlayerCustomThreadEvent.Create(AOwner: TMPVPlayerThreadEvent);
 begin
   inherited Create(True);
+
+  FreeOnTerminate := True;
   FOwner := AOwner;
   Event := RTLEventCreate;
 end;
@@ -136,10 +138,6 @@ end;
 destructor TMPVPlayerThreadEvent.Destroy;
 begin
   FThread.Terminate;
-  {$IFDEF DARWIN}
-  FThread.WaitFor;
-  {$ENDIF}
-  FThread.Free;
   FThread := NIL;
 
   inherited Destroy;

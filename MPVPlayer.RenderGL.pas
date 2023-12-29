@@ -122,6 +122,7 @@ constructor TMPVPlayerRenderThread.Create(AControl: TOpenGLControl; AHandle: Pmp
 begin
   inherited Create(True);
 
+  FreeOnTerminate := True;
   Event     := RTLEventCreate;
   Owner     := AOwner;
   mpvHandle := AHandle;
@@ -298,7 +299,6 @@ begin
   if Assigned(FThread) then
   begin
     FThread.Terminate;
-    FThread.Free;
     FThread := NIL;
   end;
 end;
