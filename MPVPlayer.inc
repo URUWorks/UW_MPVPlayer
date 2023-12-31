@@ -20,6 +20,7 @@
 
 {$mode ObjFPC}{$H+}
 {$DEFINE USETIMER}
+{$DEFINE WID_AS_STRING}
 {.$DEFINE BGLCONTROLS} // requires BGLControls package.
 {.$DEFINE SDL2} // requires pl_SDL2 package.
 

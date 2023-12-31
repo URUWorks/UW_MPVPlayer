@@ -162,13 +162,15 @@ type
     function mpv_command_(args: array of String; const reply_userdata: Integer = 0): mpv_error; // if reply_userdata > 0 commands are executed asynchronously
     function mpv_command_node_(ANode: mpv_node; const reply_userdata: Integer = 0): mpv_error;
     procedure mpv_abort_async_command_(const reply_userdata: Integer);
-    procedure mpv_set_option_string_(const AValue: String);
+    function mpv_set_option_string_(const AValue: String): Integer;
+    function mpv_get_property_string_(const APropertyName: String; const reply_userdata: Integer = 0): String;
+    procedure mpv_set_property_string_(const APropertyName: String; const AValue: String; const reply_userdata: Integer = 0);
     function mpv_get_property_boolean(const APropertyName: String; const reply_userdata: Integer = 0): Boolean;
     procedure mpv_set_property_boolean(const APropertyName: String; const AValue: Boolean; const reply_userdata: Integer = 0);
-    function mpv_get_property_double(const AProperty: String; const reply_userdata: Integer = 0): Double;
-    procedure mpv_set_property_double(const AProperty: String; const AValue: Double; const reply_userdata: Integer = 0);
-    function mpv_get_property_int64(const AProperty: String; const reply_userdata: Integer = 0): Int64;
-    procedure mpv_set_property_int64(const AProperty: String; const AValue: Int64; const reply_userdata: Integer = 0);
+    function mpv_get_property_double(const APropertyName: String; const reply_userdata: Integer = 0): Double;
+    procedure mpv_set_property_double(const APropertyName: String; const AValue: Double; const reply_userdata: Integer = 0);
+    function mpv_get_property_int64(const APropertyName: String; const reply_userdata: Integer = 0): Int64;
+    procedure mpv_set_property_int64(const APropertyName: String; const AValue: Int64; const reply_userdata: Integer = 0);
     procedure mpv_set_pause(const Value: Boolean);
 
     function GetErrorString: String;
@@ -449,12 +451,13 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_option_string_(const AValue: String);
+function TMPVPlayer.mpv_set_option_string_(const AValue: String): Integer;
 var
   s1, s2: String;
   i: Integer;
 begin
-  if not Assigned(mpv_set_option_string) or (FMPV_HANDLE = NIL) or AValue.IsEmpty then Exit;
+  FError := MPV_ERROR_OPTION_ERROR;
+  if not Assigned(mpv_set_option_string) or (FMPV_HANDLE = NIL) or AValue.IsEmpty then Exit(FError);
 
   i := Pos('=', AValue);
   if i > 0 then
@@ -469,6 +472,34 @@ begin
   end;
 
   FError := mpv_set_option_string(FMPV_HANDLE^, PChar(s1), PChar(s2));
+  Result := FError;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.mpv_get_property_string_(const APropertyName: String; const reply_userdata: Integer = 0): String;
+begin
+  if FInitialized then
+  begin
+    if reply_userdata > 0 then
+      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING)
+    else
+      FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_STRING, @Result);
+  end
+  else
+    Result := '';
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.mpv_set_property_string_(const APropertyName: String; const AValue: String; const reply_userdata: Integer = 0);
+begin
+  if not FInitialized then Exit;
+
+  if reply_userdata > 0 then
+    FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING, PChar(AValue))
+  else
+    FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_STRING, PChar(AValue));
 end;
 
 // -----------------------------------------------------------------------------
@@ -513,14 +544,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_get_property_double(const AProperty: String; const reply_userdata: Integer = 0): Double;
+function TMPVPlayer.mpv_get_property_double(const APropertyName: String; const reply_userdata: Integer = 0): Double;
 begin
   if FInitialized then
   begin
     if reply_userdata > 0 then
-      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_DOUBLE)
+      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_DOUBLE)
     else
-      FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @Result);
+      FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_DOUBLE, @Result);
   end
   else
     Result := 0;
@@ -528,27 +559,27 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_property_double(const AProperty: String; const AValue: Double; const reply_userdata: Integer = 0);
+procedure TMPVPlayer.mpv_set_property_double(const APropertyName: String; const AValue: Double; const reply_userdata: Integer = 0);
 begin
   if FInitialized then
   begin
     if reply_userdata > 0 then
-      FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue)
+      FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_DOUBLE, @AValue)
     else
-      FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_DOUBLE, @AValue);
+      FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_DOUBLE, @AValue);
   end;
 end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.mpv_get_property_int64(const AProperty: String; const reply_userdata: Integer = 0): Int64;
+function TMPVPlayer.mpv_get_property_int64(const APropertyName: String; const reply_userdata: Integer = 0): Int64;
 begin
   if FInitialized then
   begin
     if reply_userdata > 0 then
-      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_INT64)
+      FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_INT64)
     else
-      FError := mpv_get_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @Result)
+      FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_INT64, @Result)
   end
   else
     Result := 0;
@@ -556,14 +587,14 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_property_int64(const AProperty: String; const AValue: Int64; const reply_userdata: Integer = 0);
+procedure TMPVPlayer.mpv_set_property_int64(const APropertyName: String; const AValue: Int64; const reply_userdata: Integer = 0);
 begin
   if FInitialized then
   begin
     if reply_userdata > 0 then
-      FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(AProperty), MPV_FORMAT_INT64, @AValue)
+      FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_INT64, @AValue)
     else
-      FError := mpv_set_property(FMPV_HANDLE^, PChar(AProperty), MPV_FORMAT_INT64, @AValue);
+      FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_INT64, @AValue);
   end;
 end;
 
@@ -943,20 +974,25 @@ end;
 
 function TMPVPlayer.SetWID: Boolean;
 var
-  pHwnd: PtrInt;
+  pHwnd: {$IFDEF WID_AS_STRING}String{$ELSE}PtrInt{$ENDIF};
 begin
   if FRenderMode = rmEmbedding then
   begin
-    Result := False;
-    if not Assigned(mpv_set_option) or not Assigned(FMPV_HANDLE) then Exit;
+    if not Assigned(mpv_set_option) or not Assigned(FMPV_HANDLE) then Exit(False);
 
     {$IFDEF LINUX}
-    pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window);
+    pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window){$IFDEF WID_AS_STRING}.ToString{$ENDIF};
     {$ELSE}
-    pHwnd := Self.Handle;
+    pHwnd := Handle{$IFDEF WID_AS_STRING}.ToString{$ENDIF};
     {$ENDIF}
+
+    {$IFDEF WID_AS_STRING}
+    FError := mpv_set_option_string_('wid=' + pHwnd);
+    {$ELSE}
     FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
-    Result := FError = MPV_ERROR_SUCCESS;
+    {$ENDIF};
+
+    Result := (FError = MPV_ERROR_SUCCESS);
   end
   else
     Result := True;
