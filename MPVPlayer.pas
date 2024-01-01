@@ -719,7 +719,7 @@ var
   sl : TStringList;
   i  : Integer;
 begin
-  if FInitialized then Exit;
+  if FInitialized then Exit(True);
 
   FInitialized := False;
   Result := False;
@@ -1002,9 +1002,7 @@ end;
 
 procedure TMPVPlayer.Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
 begin
-  Initialize;
-
-  if FInitialized then
+  if Initialize then
   begin
     FStartAtPosMs := AStartAtPositionMs;
     FFileName := AFileName;
