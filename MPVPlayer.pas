@@ -981,9 +981,9 @@ begin
     if not Assigned(mpv_set_option) or not Assigned(FMPV_HANDLE) then Exit(False);
 
     {$IFDEF LINUX}
-    pHwnd := GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window){$IFDEF WID_AS_STRING}.ToString{$ENDIF};
+    pHwnd := {$IFDEF WID_AS_STRING}IntToStr({$ENDIF}GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window){$IFDEF WID_AS_STRING}){$ENDIF};
     {$ELSE}
-    pHwnd := Handle{$IFDEF WID_AS_STRING}.ToString{$ENDIF};
+    pHwnd := {$IFDEF WID_AS_STRING}IntToStr({$ENDIF}Handle{$IFDEF WID_AS_STRING}){$ENDIF};
     {$ENDIF}
 
     {$IFDEF WID_AS_STRING}
