@@ -2089,6 +2089,9 @@ function Load_libMPV(const AFileName: String = ''): Integer;
 function IsLibMPV_Loaded: Boolean;
 function IsLibMPV_Installed(const AFileName: String = ''): Integer;
 
+var
+  hLibMPV: TLibHandle;
+
 // -----------------------------------------------------------------------------
 
 implementation
@@ -2099,9 +2102,6 @@ uses
 {$IFDEF UNIX}
   function setlocale(category: cint; locale: pchar): pchar; cdecl; external 'c' name 'setlocale';
 {$ENDIF}
-
-var
-  hLib: TLibHandle;
 
 // -----------------------------------------------------------------------------
 
@@ -2176,10 +2176,10 @@ end;
 
 procedure Free_libMPV;
 begin
-  if hLib <> dynlibs.NilHandle then
+  if hLibMPV <> dynlibs.NilHandle then
   begin
-    if UnloadLibrary(hLib) then
-      hLib := dynlibs.NilHandle;
+    if UnloadLibrary(hLibMPV) then
+      hLibMPV := dynlibs.NilHandle;
   end;
 
   mpv_client_api_version := NIL;
@@ -2237,55 +2237,55 @@ begin
   {$ENDIF}
 
   if AFileName.IsEmpty then
-    hLib := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF})
+    hLibMPV := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF})
   else
-    hLib := LoadLibrary(AFileName);
+    hLibMPV := LoadLibrary(AFileName);
 
-  if (hLib = dynlibs.NilHandle) then Exit;
+  if (hLibMPV = dynlibs.NilHandle) then Exit;
 
-  Pointer(mpv_client_api_version) := GetProcAddress(hLib,'mpv_client_api_version');
-  Pointer(mpv_error_string) := GetProcAddress(hLib,'mpv_error_string');
-  Pointer(mpv_free) := GetProcAddress(hLib,'mpv_free');
-  Pointer(mpv_client_name) := GetProcAddress(hLib,'mpv_client_name');
-  Pointer(mpv_client_id) := GetProcAddress(hLib,'mpv_client_id');
-  Pointer(mpv_create) := GetProcAddress(hLib,'mpv_create');
-  Pointer(mpv_initialize) := GetProcAddress(hLib,'mpv_initialize');
-  Pointer(mpv_destroy) := GetProcAddress(hLib,'mpv_destroy');
-  Pointer(mpv_terminate_destroy) := GetProcAddress(hLib,'mpv_terminate_destroy');
-  Pointer(mpv_create_client) := GetProcAddress(hLib,'mpv_create_client');
-  Pointer(mpv_create_weak_client) := GetProcAddress(hLib,'mpv_create_weak_client');
-  Pointer(mpv_load_config_file) := GetProcAddress(hLib,'mpv_load_config_file');
-  Pointer(mpv_get_time_us) := GetProcAddress(hLib,'mpv_get_time_us');
-  Pointer(mpv_free_node_contents) := GetProcAddress(hLib,'mpv_free_node_contents');
-  Pointer(mpv_set_option) := GetProcAddress(hLib,'mpv_set_option');
-  Pointer(mpv_set_option_string) := GetProcAddress(hLib,'mpv_set_option_string');
-  Pointer(mpv_command) := GetProcAddress(hLib,'mpv_command');
-  Pointer(mpv_command_node) := GetProcAddress(hLib,'mpv_command_node');
-  Pointer(mpv_command_ret) := GetProcAddress(hLib,'mpv_command_ret');
-  Pointer(mpv_command_string) := GetProcAddress(hLib,'mpv_command_string');
-  Pointer(mpv_command_async) := GetProcAddress(hLib,'mpv_command_async');
-  Pointer(mpv_command_node_async) := GetProcAddress(hLib,'mpv_command_node_async');
-  Pointer(mpv_abort_async_command) := GetProcAddress(hLib,'mpv_abort_async_command');
-  Pointer(mpv_set_property) := GetProcAddress(hLib,'mpv_set_property');
-  Pointer(mpv_set_property_string) := GetProcAddress(hLib,'mpv_set_property_string');
-  Pointer(mpv_set_property_async) := GetProcAddress(hLib,'mpv_set_property_async');
-  Pointer(mpv_get_property) := GetProcAddress(hLib,'mpv_get_property');
-  Pointer(mpv_get_property_string) := GetProcAddress(hLib,'mpv_get_property_string');
-  Pointer(mpv_get_property_osd_string) := GetProcAddress(hLib,'mpv_get_property_osd_string');
-  Pointer(mpv_get_property_async) := GetProcAddress(hLib,'mpv_get_property_async');
-  Pointer(mpv_observe_property) := GetProcAddress(hLib,'mpv_observe_property');
-  Pointer(mpv_unobserve_property) := GetProcAddress(hLib,'mpv_unobserve_property');
-  Pointer(mpv_event_name) := GetProcAddress(hLib,'mpv_event_name');
-  Pointer(mpv_event_to_node) := GetProcAddress(hLib,'mpv_event_to_node');
-  Pointer(mpv_request_event) := GetProcAddress(hLib,'mpv_request_event');
-  Pointer(mpv_request_log_messages) := GetProcAddress(hLib,'mpv_request_log_messages');
-  Pointer(mpv_wait_event) := GetProcAddress(hLib,'mpv_wait_event');
-  Pointer(mpv_wakeup) := GetProcAddress(hLib,'mpv_wakeup');
-  Pointer(mpv_set_wakeup_callback) := GetProcAddress(hLib,'mpv_set_wakeup_callback');
-  Pointer(mpv_wait_async_requests) := GetProcAddress(hLib,'mpv_wait_async_requests');
-  Pointer(mpv_hook_add) := GetProcAddress(hLib,'mpv_hook_add');
-  Pointer(mpv_hook_continue) := GetProcAddress(hLib,'mpv_hook_continue');
-  Pointer(mpv_get_wakeup_pipe) := GetProcAddress(hLib,'mpv_get_wakeup_pipe');
+  Pointer(mpv_client_api_version) := GetProcAddress(hLibMPV,'mpv_client_api_version');
+  Pointer(mpv_error_string) := GetProcAddress(hLibMPV,'mpv_error_string');
+  Pointer(mpv_free) := GetProcAddress(hLibMPV,'mpv_free');
+  Pointer(mpv_client_name) := GetProcAddress(hLibMPV,'mpv_client_name');
+  Pointer(mpv_client_id) := GetProcAddress(hLibMPV,'mpv_client_id');
+  Pointer(mpv_create) := GetProcAddress(hLibMPV,'mpv_create');
+  Pointer(mpv_initialize) := GetProcAddress(hLibMPV,'mpv_initialize');
+  Pointer(mpv_destroy) := GetProcAddress(hLibMPV,'mpv_destroy');
+  Pointer(mpv_terminate_destroy) := GetProcAddress(hLibMPV,'mpv_terminate_destroy');
+  Pointer(mpv_create_client) := GetProcAddress(hLibMPV,'mpv_create_client');
+  Pointer(mpv_create_weak_client) := GetProcAddress(hLibMPV,'mpv_create_weak_client');
+  Pointer(mpv_load_config_file) := GetProcAddress(hLibMPV,'mpv_load_config_file');
+  Pointer(mpv_get_time_us) := GetProcAddress(hLibMPV,'mpv_get_time_us');
+  Pointer(mpv_free_node_contents) := GetProcAddress(hLibMPV,'mpv_free_node_contents');
+  Pointer(mpv_set_option) := GetProcAddress(hLibMPV,'mpv_set_option');
+  Pointer(mpv_set_option_string) := GetProcAddress(hLibMPV,'mpv_set_option_string');
+  Pointer(mpv_command) := GetProcAddress(hLibMPV,'mpv_command');
+  Pointer(mpv_command_node) := GetProcAddress(hLibMPV,'mpv_command_node');
+  Pointer(mpv_command_ret) := GetProcAddress(hLibMPV,'mpv_command_ret');
+  Pointer(mpv_command_string) := GetProcAddress(hLibMPV,'mpv_command_string');
+  Pointer(mpv_command_async) := GetProcAddress(hLibMPV,'mpv_command_async');
+  Pointer(mpv_command_node_async) := GetProcAddress(hLibMPV,'mpv_command_node_async');
+  Pointer(mpv_abort_async_command) := GetProcAddress(hLibMPV,'mpv_abort_async_command');
+  Pointer(mpv_set_property) := GetProcAddress(hLibMPV,'mpv_set_property');
+  Pointer(mpv_set_property_string) := GetProcAddress(hLibMPV,'mpv_set_property_string');
+  Pointer(mpv_set_property_async) := GetProcAddress(hLibMPV,'mpv_set_property_async');
+  Pointer(mpv_get_property) := GetProcAddress(hLibMPV,'mpv_get_property');
+  Pointer(mpv_get_property_string) := GetProcAddress(hLibMPV,'mpv_get_property_string');
+  Pointer(mpv_get_property_osd_string) := GetProcAddress(hLibMPV,'mpv_get_property_osd_string');
+  Pointer(mpv_get_property_async) := GetProcAddress(hLibMPV,'mpv_get_property_async');
+  Pointer(mpv_observe_property) := GetProcAddress(hLibMPV,'mpv_observe_property');
+  Pointer(mpv_unobserve_property) := GetProcAddress(hLibMPV,'mpv_unobserve_property');
+  Pointer(mpv_event_name) := GetProcAddress(hLibMPV,'mpv_event_name');
+  Pointer(mpv_event_to_node) := GetProcAddress(hLibMPV,'mpv_event_to_node');
+  Pointer(mpv_request_event) := GetProcAddress(hLibMPV,'mpv_request_event');
+  Pointer(mpv_request_log_messages) := GetProcAddress(hLibMPV,'mpv_request_log_messages');
+  Pointer(mpv_wait_event) := GetProcAddress(hLibMPV,'mpv_wait_event');
+  Pointer(mpv_wakeup) := GetProcAddress(hLibMPV,'mpv_wakeup');
+  Pointer(mpv_set_wakeup_callback) := GetProcAddress(hLibMPV,'mpv_set_wakeup_callback');
+  Pointer(mpv_wait_async_requests) := GetProcAddress(hLibMPV,'mpv_wait_async_requests');
+  Pointer(mpv_hook_add) := GetProcAddress(hLibMPV,'mpv_hook_add');
+  Pointer(mpv_hook_continue) := GetProcAddress(hLibMPV,'mpv_hook_continue');
+  Pointer(mpv_get_wakeup_pipe) := GetProcAddress(hLibMPV,'mpv_get_wakeup_pipe');
 
   if not Assigned(mpv_client_api_version) or
      not Assigned(mpv_error_string) or
@@ -2341,7 +2341,7 @@ end;
 
 function IsLibMPV_Loaded: Boolean;
 begin
-  Result := hLib <> dynlibs.NilHandle;
+  Result := hLibMPV <> dynlibs.NilHandle;
 end;
 
 // -----------------------------------------------------------------------------
@@ -2378,7 +2378,7 @@ end;
 // -----------------------------------------------------------------------------
 
 initialization
-  hLib := dynlibs.NilHandle;
+  hLibMPV := dynlibs.NilHandle;
 
 // -----------------------------------------------------------------------------
 

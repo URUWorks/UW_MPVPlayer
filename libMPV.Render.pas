@@ -769,9 +769,9 @@ var
 
 // -----------------------------------------------------------------------------
 
-procedure Free_libMPV_Render;
-function Load_libMPV_Render(const AFileName: String = ''): Boolean;
-function Is_libMPV_Render_Loaded: Boolean;
+procedure UnInitialize_libMPV_Render;
+function Initialize_libMPV_Render(const ALibHandle: TLibHandle): Boolean;
+function Is_libMPV_Render_Initialized(const ALibHandle: TLibHandle): Boolean;
 
 // -----------------------------------------------------------------------------
 
@@ -780,19 +780,10 @@ implementation
 uses
   SysUtils, dynlibs;
 
-var
-  hLib: TLibHandle;
-
 // -----------------------------------------------------------------------------
 
-procedure Free_libMPV_Render;
+procedure UnInitialize_libMPV_Render;
 begin
-  if hLib <> dynlibs.NilHandle then
-  begin
-    if UnloadLibrary(hLib) then
-      hLib := dynlibs.NilHandle;
-  end;
-
   mpv_render_context_create := NIL;
   mpv_render_context_set_parameter := NIL;
   mpv_render_context_get_info := NIL;
@@ -805,31 +796,25 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function Load_libMPV_Render(const AFileName: String = ''): Boolean;
+function Initialize_libMPV_Render(const ALibHandle: TLibHandle): Boolean;
 begin
-  if Is_libMPV_Render_Loaded then Exit(True);
+  if Is_libMPV_Render_Initialized(ALibHandle) then Exit(True);
 
   Result := False;
+  if ALibHandle = dynlibs.NilHandle then Exit;
 
-  if AFileName.IsEmpty then
-    hLib := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF})
-  else
-    hLib := LoadLibrary(AFileName);
+  Pointer(mpv_render_context_create) := GetProcAddress(ALibHandle,'mpv_render_context_create');
+  Pointer(mpv_render_context_set_parameter) := GetProcAddress(ALibHandle,'mpv_render_context_set_parameter');
+  Pointer(mpv_render_context_get_info) := GetProcAddress(ALibHandle,'mpv_render_context_get_info');
+  Pointer(mpv_render_context_set_update_callback) := GetProcAddress(ALibHandle,'mpv_render_context_set_update_callback');
+  Pointer(mpv_render_context_update) := GetProcAddress(ALibHandle,'mpv_render_context_update');
+  Pointer(mpv_render_context_render) := GetProcAddress(ALibHandle,'mpv_render_context_render');
+  Pointer(mpv_render_context_report_swap) := GetProcAddress(ALibHandle,'mpv_render_context_report_swap');
+  Pointer(mpv_render_context_free) := GetProcAddress(ALibHandle,'mpv_render_context_free');
 
-  if hLib = dynlibs.NilHandle then Exit;
-
-  Pointer(mpv_render_context_create) := GetProcAddress(hLib,'mpv_render_context_create');
-  Pointer(mpv_render_context_set_parameter) := GetProcAddress(hLib,'mpv_render_context_set_parameter');
-  Pointer(mpv_render_context_get_info) := GetProcAddress(hLib,'mpv_render_context_get_info');
-  Pointer(mpv_render_context_set_update_callback) := GetProcAddress(hLib,'mpv_render_context_set_update_callback');
-  Pointer(mpv_render_context_update) := GetProcAddress(hLib,'mpv_render_context_update');
-  Pointer(mpv_render_context_render) := GetProcAddress(hLib,'mpv_render_context_render');
-  Pointer(mpv_render_context_report_swap) := GetProcAddress(hLib,'mpv_render_context_report_swap');
-  Pointer(mpv_render_context_free) := GetProcAddress(hLib,'mpv_render_context_free');
-
-  if not Is_libMPV_Render_Loaded then
+  if not Is_libMPV_Render_Initialized(ALibHandle) then
   begin
-    Free_libMPV_Render;
+    UnInitialize_libMPV_Render;
     Exit;
   end;
 
@@ -838,9 +823,9 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function Is_libMPV_Render_Loaded: Boolean;
+function Is_libMPV_Render_Initialized(const ALibHandle: TLibHandle): Boolean;
 begin
-  Result := (hLib <> dynlibs.NilHandle) and
+  Result := (ALibHandle <> dynlibs.NilHandle) and
     Assigned(mpv_render_context_create) and
     Assigned(mpv_render_context_set_parameter) and
     Assigned(mpv_render_context_get_info) and
@@ -854,7 +839,6 @@ end;
 // -----------------------------------------------------------------------------
 
 initialization
-  hLib := dynlibs.NilHandle;
 
 // -----------------------------------------------------------------------------
 

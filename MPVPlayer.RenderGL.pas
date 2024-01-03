@@ -77,14 +77,16 @@ type
   TMPVPlayerRenderGL = class
   private
     FThread : TMPVPlayerRenderThread;
+    FInitialized : Boolean;
     function GetRenderActive: Boolean;
   public
-    constructor Create(AMPVFileName: String; AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+    constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Terminate;
     procedure Render(const ForceInvalidate: Boolean = False);
 
     property Active : Boolean read GetRenderActive;
+    property Initialized : Boolean read FInitialized;
   end;
 
 // -----------------------------------------------------------------------------
@@ -239,7 +241,7 @@ begin
 
   SetLength(mpvRenderParams, 0);
   SetLength(mpvUpdateParams, 0);
-  Free_libMPV_Render;
+  UnInitialize_libMPV_Render;
 end;
 
 // -----------------------------------------------------------------------------
@@ -278,10 +280,11 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderGL.Create(AMPVFileName: String; AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+constructor TMPVPlayerRenderGL.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
   FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self {$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
-  if Load_libMPV_Render(AMPVFileName) then FThread.Start;
+  FInitialized := Initialize_libMPV_Render(hLibMPV);
+  if FInitialized then FThread.Start;
 end;
 
 // -----------------------------------------------------------------------------

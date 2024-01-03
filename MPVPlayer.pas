@@ -133,14 +133,14 @@ type
     function Initialize: Boolean;
     procedure UnInitialize;
 
-    procedure InitializeRenderGL;
+    function InitializeRenderGL: Boolean;
     procedure UnInitializeRenderGL;
 
     procedure PushEvent;
     procedure ReceivedEvent(Sender: TObject);
 
     {$IFDEF SDL2}
-    procedure InitializeRenderSDL;
+    function InitializeRenderSDL: Boolean;
     procedure UnInitializeRenderSDL;
     {$ENDIF}
 
@@ -816,10 +816,24 @@ begin
   mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
 
   if FRenderMode = rmOpenGL then
-    InitializeRenderGL
+  begin
+    if not InitializeRenderGL then
+    begin
+      FError := MPV_ERROR_VO_INIT_FAILED;
+      UnInitializeRenderGL;
+      Exit;
+    end;
+  end
   {$IFDEF SDL2}
   else if FRenderMode = rmSDL2 then
-    InitializeRenderSDL
+  begin
+    if not InitializeRenderSDL then
+    begin
+      FError := MPV_ERROR_VO_INIT_FAILED;
+      UnInitializeRenderSDL;
+      Exit;
+    end;
+  end;
   {$ENDIF};
 
   FPausePosMs := -1;
@@ -877,7 +891,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.InitializeRenderGL;
+function TMPVPlayer.InitializeRenderGL: Boolean;
 begin
   FGL         := TOpenGLControl.Create(Self);
   FGL.Parent  := Self;
@@ -887,7 +901,8 @@ begin
   FGL.OnMouseWheelDown := OnMouseWheelDown;
   FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
-  FRenderGL := TMPVPlayerRenderGL.Create(MPVFileName, FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
+  FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
+  Result := FRenderGL.Initialized;
 end;
 
 // -----------------------------------------------------------------------------
@@ -911,9 +926,10 @@ end;
 // -----------------------------------------------------------------------------
 
 {$IFDEF SDL2}
-procedure TMPVPlayer.InitializeRenderSDL;
+function TMPVPlayer.InitializeRenderSDL: Boolean;
 begin
-  FRenderSDL := TMPVPlayerRenderSDL.Create(MPVFileName, Handle, FMPV_HANDLE);
+  FRenderSDL := TMPVPlayerRenderSDL.Create(Handle, FMPV_HANDLE);
+  Result := FRenderSDL.Initialized;
 end;
 
 // -----------------------------------------------------------------------------

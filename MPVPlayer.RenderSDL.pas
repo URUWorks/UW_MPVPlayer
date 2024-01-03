@@ -71,13 +71,15 @@ type
   TMPVPlayerRenderSDL = class
   private
     FThread : TMPVPlayerRenderThread;
+    FInitialized : Boolean;
     function GetRenderActive: Boolean;
   public
-    constructor Create(AMPVFileName: String; ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
+    constructor Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
     destructor Destroy; override;
     procedure Render(const ForceInvalidate: Boolean = False);
 
     property Active : Boolean read GetRenderActive;
+    property Initialized : Boolean read FInitialized;
   end;
 
 // -----------------------------------------------------------------------------
@@ -238,7 +240,7 @@ begin
 
   SetLength(mpvRenderParams, 0);
   SetLength(mpvUpdateParams, 0);
-  Free_libMPV_Render;
+  UnInitialize_libMPV_Render;
 end;
 
 // -----------------------------------------------------------------------------
@@ -280,10 +282,10 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderSDL.Create(AMPVFileName: String; ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
+constructor TMPVPlayerRenderSDL.Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
 begin
   FThread := TMPVPlayerRenderThread.Create(ACtrlHandle, AMPVHandle, Self);
-  if Load_libMPV_Render(AMPVFileName) and FThread.InitializeRenderContext then
+  FInitialized := Initialize_libMPV_Render(hLibMPV) and FThread.InitializeRenderContext;
     FThread.Start;
 end;
 
