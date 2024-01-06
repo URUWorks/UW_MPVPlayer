@@ -46,6 +46,7 @@ type
   { TMPVPlayer Types }
 
   TMPVPlayerRenderMode        = (rmEmbedding, rmOpenGL{$IFDEF SDL2}, rmSDL2{$ENDIF});
+  TMPVPlayerRendeFailAction   = (rfSwitchToEmbedding, rfNone);
   TMPVPlayerTrackType         = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
   TMPVPlayerLogLevel          = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerScreenshotMode    = (smSubtitles, smVideo, smWindow);
@@ -84,7 +85,9 @@ type
     FAutoStart      : Boolean;
     FAutoLoadSub    : Boolean;
     FKeepAspect     : Boolean;
+    FNoAudioDisplay : Boolean;
     FSMPTEMode      : Boolean;
+    FRenderFail     : TMPVPlayerRendeFailAction;
     FStartAtPosMs   : Integer;
     FPausePosMs     : Integer;
     FFileName       : String;
@@ -144,9 +147,9 @@ type
     procedure UnInitializeRenderSDL;
     {$ENDIF}
 
+    function SetWID: Boolean;
     procedure SetRenderMode(Value: TMPVPlayerRenderMode);
     function LogLevelToString: String;
-    function SetWID: Boolean;
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -180,7 +183,7 @@ type
     procedure Play(const AFileName: String; const AStartAtPositionMs: Integer = 0); overload;
     procedure Play(const FromMs: Integer); overload;
     procedure Close;
-    procedure Loop(const AStartTimeMs, BFinalTimeMs: Integer; const ALoopCount: Integer = -1); // string format hh:mm:ss.zzz
+    procedure Loop(const AStartTimeMs, BFinalTimeMs: Integer; const ALoopCount: Integer = -1);
     procedure Pause;
     procedure Resume(const ForcePlay: Boolean = False);
     procedure Stop;
@@ -227,18 +230,19 @@ type
     procedure SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters);
     procedure ClearAudioFilters;
 
-    property mpv_handle    : Pmpv_handle         read FMPV_HANDLE;
-    property Error         : mpv_error           read FError;
-    property ErrorString   : String              read GetErrorString;
-    property Version       : DWord               read FVersion;
-    property VersionString : String              read GetVersionString;
-    property Initialized   : Boolean             read FInitialized;
-    property StartOptions  : TStringList         read FStartOptions;
-    property TrackList     : TMPVPlayerTrackList read FTrackList;
-    property FileName      : String              read FFileName;
-    property MPVFileName   : String              read FMPVFileName   write FMPVFileName;
-    property YTDLPFileName : String              read FYTDLPFileName write FYTDLPFileName;
-    property SMPTEMode     : Boolean             read FSMPTEMode     write FSMPTEMode;
+    property mpv_handle       : Pmpv_handle               read FMPV_HANDLE;
+    property Error            : mpv_error                 read FError;
+    property ErrorString      : String                    read GetErrorString;
+    property Version          : DWord                     read FVersion;
+    property VersionString    : String                    read GetVersionString;
+    property Initialized      : Boolean                   read FInitialized;
+    property StartOptions     : TStringList               read FStartOptions;
+    property TrackList        : TMPVPlayerTrackList       read FTrackList;
+    property FileName         : String                    read FFileName;
+    property MPVFileName      : String                    read FMPVFileName   write FMPVFileName;
+    property YTDLPFileName    : String                    read FYTDLPFileName write FYTDLPFileName;
+    property SMPTEMode        : Boolean                   read FSMPTEMode     write FSMPTEMode;
+    property RenderFailAction : TMPVPlayerRendeFailAction read FRenderFail    write FRenderFail;
     {$IFDEF USETIMER}
     property Timer         : TTimer read FTimer;
     {$ENDIF}
@@ -306,6 +310,7 @@ type
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
     property KeepAspect: Boolean read FKeepAspect write FKeepAspect;
+    property NoAudioDisplay: Boolean read FNoAudioDisplay write FNoAudioDisplay;
     property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
     property LogLevel: TMPVPlayerLogLevel read FLogLevel write FLogLevel;
 
@@ -632,34 +637,36 @@ begin
   Caption          := '';
 
   // our control setup
-  FGL            := NIL;
-  FMPV_HANDLE    := NIL;
-  FVersion       := 0;
-  FError         := 0;
-  FInitialized   := False;
-  FMPVEvent      := NIL;
-  FLogLevel      := llStatus;
-  FAutoStart     := True;
-  FAutoLoadSub   := False;
-  FKeepAspect    := True;
-  FSMPTEMode     := False;
-  FPausePosMs    := -1;
-  FFileName      := '';
+  FGL             := NIL;
+  FMPV_HANDLE     := NIL;
+  FVersion        := 0;
+  FError          := 0;
+  FInitialized    := False;
+  FMPVEvent       := NIL;
+  FLogLevel       := llStatus;
+  FAutoStart      := True;
+  FAutoLoadSub    := False;
+  FKeepAspect     := True;
+  FNoAudioDisplay := False;
+  FSMPTEMode      := False;
+  FRenderFail     := rfNone;
+  FPausePosMs     := -1;
+  FFileName       := '';
   {$IFDEF LINUX}
-  FMPVFileName   := '';
+  FMPVFileName    := '';
   {$ELSE}
-  FMPVFileName   := LIBMPV_DLL_NAME;
+  FMPVFileName    := LIBMPV_DLL_NAME;
   {$ENDIF}
-  FYTDLPFileName := '';
-  FStartOptions  := TStringList.Create;
+  FYTDLPFileName  := '';
+  FStartOptions   := TStringList.Create;
   SetLength(FTrackList, 0);
 
   {$IFDEF WINDOWS}
-  FRenderMode    := rmEmbedding;
+  FRenderMode     := rmEmbedding;
   {$ELSE}
-  FRenderMode    := rmOpenGL;
+  FRenderMode     := rmOpenGL;
   {$ENDIF}
-  FRenderGL      := NIL;
+  FRenderGL       := NIL;
 
   {$IFDEF USETIMER}
   FTimer          := TTimer.Create(NIL);
@@ -674,18 +681,20 @@ begin
     Sorted     := True;
     Duplicates := dupIgnore;
 
+    Add('osc=no');        // default: yes.
 //    {$IFDEF WINDOWS}
-    Add('hwdec=no');              // fix some windows crash
+    Add('hwdec=no');                // fix some windows crash
 //    {$ELSE}
-//    Add('hwdec=auto');            // enable best hw decoder.
+//    Add('hwdec=auto');              // enable best hw decoder.
 //    {$ENDIF}
-//    Add('osd-duration=5000');     // default: 1000.
-    Add('keep-open=always');      // don't auto close video.
-    Add('vd-lavc-dr=no');         // fix possibles deadlock issues with OpenGL
-    Add('hr-seek=yes');           // use precise seeks whenever possible.
-    Add('hr-seek-framedrop=no');  // default: yes.
-    Add('seekbarkeyframes=no');   // default: yes.
-    Add('ytdl=yes');              // YouTube downloader
+//    Add('osd-duration=5000');       // default: 1000.
+    Add('keep-open=always');        // don't auto close video.
+    Add('vd-lavc-dr=no');           // fix possibles deadlock issues with OpenGL
+    Add('hr-seek=yes');             // use precise seeks whenever possible.
+    Add('hr-seek-framedrop=no');    // default: yes.
+    Add('seekbarkeyframes=no');     // default: yes.
+//    Add('osd-scale-by-window=no'); // scale the OSD with the window size. default: yes.
+    Add('ytdl=yes');                // YouTube downloader
   end;
 
   {$IFDEF WINDOWS}
@@ -754,7 +763,10 @@ begin
       sl.Add('sub=no'); // don't load subtitles
 
     if not FKeepAspect then
-      sl.Add('no-keepaspect'); // always stretch the video to window size
+      sl.Add('keepaspect=no'); // always stretch the video to window size
+
+    if FNoAudioDisplay then
+      sl.Add('audio-display=no'); // no display cover art
 
     for i := 0 to sl.Count-1 do
       mpv_set_option_string_(sl[i]);
@@ -819,9 +831,15 @@ begin
   begin
     if not InitializeRenderGL then
     begin
-      FError := MPV_ERROR_VO_INIT_FAILED;
       UnInitializeRenderGL;
-      Exit;
+
+      if FRenderFail = rfNone then
+      begin
+        FError := MPV_ERROR_VO_INIT_FAILED;
+        Exit;
+      end
+      else
+        FRenderMode := rmEmbedding;
     end;
   end
   {$IFDEF SDL2}
@@ -829,9 +847,15 @@ begin
   begin
     if not InitializeRenderSDL then
     begin
-      FError := MPV_ERROR_VO_INIT_FAILED;
       UnInitializeRenderSDL;
-      Exit;
+
+      if FRenderFail = rfNone then
+      begin
+        FError := MPV_ERROR_VO_INIT_FAILED;
+        Exit;
+      end
+      else
+        FRenderMode := rmEmbedding;
     end;
   end;
   {$ENDIF};
@@ -902,7 +926,7 @@ begin
   FGL.OnResize := @DoResize; // force to draw opengl context when paused
 
   FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
-  Result := FRenderGL.Initialized;
+  Result := FRenderGL.Active;
 end;
 
 // -----------------------------------------------------------------------------
@@ -929,7 +953,7 @@ end;
 function TMPVPlayer.InitializeRenderSDL: Boolean;
 begin
   FRenderSDL := TMPVPlayerRenderSDL.Create(Handle, FMPV_HANDLE);
-  Result := FRenderSDL.Initialized;
+  Result := FRenderSDL.Active;
 end;
 
 // -----------------------------------------------------------------------------
@@ -943,6 +967,29 @@ begin
   end;
 end;
 {$ENDIF}
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.SetWID: Boolean;
+var
+  pHwnd: {$IFDEF WID_AS_STRING}String{$ELSE}PtrInt{$ENDIF};
+begin
+  if not Assigned(mpv_set_option) or not Assigned(FMPV_HANDLE) then Exit(False);
+
+  {$IFDEF LINUX}
+  pHwnd := {$IFDEF WID_AS_STRING}IntToStr({$ENDIF}GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window){$IFDEF WID_AS_STRING}){$ENDIF};
+  {$ELSE}
+  pHwnd := {$IFDEF WID_AS_STRING}IntToStr({$ENDIF}Handle{$IFDEF WID_AS_STRING}){$ENDIF};
+  {$ENDIF}
+
+  {$IFDEF WID_AS_STRING}
+  FError := mpv_set_option_string_('wid=' + pHwnd);
+  {$ELSE}
+  FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
+  {$ENDIF};
+
+  Result := (FError = MPV_ERROR_SUCCESS);
+end;
 
 // -----------------------------------------------------------------------------
 
@@ -988,34 +1035,6 @@ end;
 
 // -----------------------------------------------------------------------------
 
-function TMPVPlayer.SetWID: Boolean;
-var
-  pHwnd: {$IFDEF WID_AS_STRING}String{$ELSE}PtrInt{$ENDIF};
-begin
-  if FRenderMode = rmEmbedding then
-  begin
-    if not Assigned(mpv_set_option) or not Assigned(FMPV_HANDLE) then Exit(False);
-
-    {$IFDEF LINUX}
-    pHwnd := {$IFDEF WID_AS_STRING}IntToStr({$ENDIF}GDK_WINDOW_XWINDOW(PGtkWidget(Self.Handle)^.window){$IFDEF WID_AS_STRING}){$ENDIF};
-    {$ELSE}
-    pHwnd := {$IFDEF WID_AS_STRING}IntToStr({$ENDIF}Handle{$IFDEF WID_AS_STRING}){$ENDIF};
-    {$ENDIF}
-
-    {$IFDEF WID_AS_STRING}
-    FError := mpv_set_option_string_('wid=' + pHwnd);
-    {$ELSE}
-    FError := mpv_set_option(FMPV_HANDLE^, 'wid', MPV_FORMAT_INT64, @pHwnd);
-    {$ENDIF};
-
-    Result := (FError = MPV_ERROR_SUCCESS);
-  end
-  else
-    Result := True;
-end;
-
-// -----------------------------------------------------------------------------
-
 procedure TMPVPlayer.Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
 begin
   if Initialize then
@@ -1054,6 +1073,7 @@ begin
   begin
     SeekInMs(AStartTimeMs);
 
+    // string format hh:mm:ss.zzz
     mpv_set_option_string_('ab-loop-a=' + MSToTimeStamp(AStartTimeMs));
     mpv_set_option_string_('ab-loop-b=' + MSToTimeStamp(BFinalTimeMs));
 
