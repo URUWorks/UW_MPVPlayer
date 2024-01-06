@@ -71,7 +71,6 @@ type
   TMPVPlayerRenderSDL = class
   private
     FThread : TMPVPlayerRenderThread;
-    FInitialized : Boolean;
     function GetRenderActive: Boolean;
   public
     constructor Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
@@ -79,7 +78,6 @@ type
     procedure Render(const ForceInvalidate: Boolean = False);
 
     property Active : Boolean read GetRenderActive;
-    property Initialized : Boolean read FInitialized;
   end;
 
 // -----------------------------------------------------------------------------
@@ -284,9 +282,12 @@ end;
 
 constructor TMPVPlayerRenderSDL.Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
 begin
-  FThread := TMPVPlayerRenderThread.Create(ACtrlHandle, AMPVHandle, Self);
-  FInitialized := Initialize_libMPV_Render(hLibMPV) and FThread.InitializeRenderContext;
+  if Initialize_libMPV_Render(hLibMPV) then
+  begin
+    FThread := TMPVPlayerRenderThread.Create(ACtrlHandle, AMPVHandle, Self);
+    FThread.InitializeRenderContext;
     FThread.Start;
+  end;
 end;
 
 // -----------------------------------------------------------------------------

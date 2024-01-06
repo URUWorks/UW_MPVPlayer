@@ -63,6 +63,7 @@ type
     Event : PRTLEvent;
     IsRenderActive : Boolean;
     ForceInvalidateContext : Boolean;
+    Ready : Boolean;
     {$IFDEF BGLCONTROLS}
     FDrawCallback: TMPVPlayerDrawEvent;
     {$ENDIF}
@@ -77,7 +78,6 @@ type
   TMPVPlayerRenderGL = class
   private
     FThread : TMPVPlayerRenderThread;
-    FInitialized : Boolean;
     function GetRenderActive: Boolean;
   public
     constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
@@ -86,7 +86,6 @@ type
     procedure Render(const ForceInvalidate: Boolean = False);
 
     property Active : Boolean read GetRenderActive;
-    property Initialized : Boolean read FInitialized;
   end;
 
 // -----------------------------------------------------------------------------
@@ -136,6 +135,7 @@ begin
 
   IsRenderActive         := False;
   ForceInvalidateContext := False;
+  Ready                  := False;
   mpvRenderContext       := NIL;
 end;
 
@@ -164,10 +164,7 @@ end;
 procedure TMPVPlayerRenderThread.Execute;
 begin
   if not InitializeRenderContext then
-  begin
-    Owner.FThread := NIL;
     Exit;
-  end;
 
   while not Terminated do
   begin
@@ -194,39 +191,42 @@ end;
 function TMPVPlayerRenderThread.InitializeRenderContext: Boolean;
 begin
   Result := False;
+  try
+    mpvOpenGLParams.get_proc_address := @get_proc_address_mpv;
+    mpvOpenGLParams.get_proc_address_ctx := NIL;
 
-  mpvOpenGLParams.get_proc_address := @get_proc_address_mpv;
-  mpvOpenGLParams.get_proc_address_ctx := NIL;
+    // Initialize params
+    SetLength(mpvRenderParams, 4);
+    mpvRenderParams[0]._type := MPV_RENDER_PARAM_API_TYPE;
+    mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_OPENGL);
+    mpvRenderParams[1]._type := MPV_RENDER_PARAM_OPENGL_INIT_PARAMS;
+    mpvRenderParams[1].Data  := @mpvOpenGLParams;
+    mpvRenderParams[2]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
+    mpvRenderParams[2].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
+    mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
+    mpvRenderParams[3].Data  := NIL;
 
-  // Initialize params
-  SetLength(mpvRenderParams, 4);
-  mpvRenderParams[0]._type := MPV_RENDER_PARAM_API_TYPE;
-  mpvRenderParams[0].Data  := PChar(MPV_RENDER_API_TYPE_OPENGL);
-  mpvRenderParams[1]._type := MPV_RENDER_PARAM_OPENGL_INIT_PARAMS;
-  mpvRenderParams[1].Data  := @mpvOpenGLParams;
-  mpvRenderParams[2]._type := MPV_RENDER_PARAM_ADVANCED_CONTROL;
-  mpvRenderParams[2].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
-  mpvRenderParams[3]._type := MPV_RENDER_PARAM_INVALID;
-  mpvRenderParams[3].Data  := NIL;
+    FGL.MakeCurrent();
+    FError := mpv_render_context_create(mpvRenderContext, mpvHandle^, Pmpv_render_param(@mpvRenderParams[0]));
+    if FError <> MPV_ERROR_SUCCESS then Exit;
 
-  FGL.MakeCurrent();
-  FError := mpv_render_context_create(mpvRenderContext, mpvHandle^, Pmpv_render_param(@mpvRenderParams[0]));
-  if FError <> MPV_ERROR_SUCCESS then Exit;
+    mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Owner);
 
-  mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Owner);
+    // Update params
+    Update_mpvfbo;
+    SetLength(mpvUpdateParams, 3);
+    mpvUpdateParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
+    mpvUpdateParams[0].Data  := @mpvfbo;
+    mpvUpdateParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
+    mpvUpdateParams[1].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
+    mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
+    mpvUpdateParams[2].Data  := NIL;
 
-  // Update params
-  Update_mpvfbo;
-  SetLength(mpvUpdateParams, 3);
-  mpvUpdateParams[0]._type := MPV_RENDER_PARAM_OPENGL_FBO;
-  mpvUpdateParams[0].Data  := @mpvfbo;
-  mpvUpdateParams[1]._type := MPV_RENDER_PARAM_FLIP_Y;
-  mpvUpdateParams[1].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
-  mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
-  mpvUpdateParams[2].Data  := NIL;
-
-  IsRenderActive := True;
-  Result := True;
+    IsRenderActive := True;
+    Result := True;
+  finally
+    Ready := True;
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -282,9 +282,12 @@ end;
 
 constructor TMPVPlayerRenderGL.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
-  FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self {$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
-  FInitialized := Initialize_libMPV_Render(hLibMPV);
-  if FInitialized then FThread.Start;
+  if Initialize_libMPV_Render(hLibMPV) then
+  begin
+    FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self {$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
+    FThread.Start;
+    while not FThread.Ready do Sleep(100);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
