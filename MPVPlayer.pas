@@ -15,7 +15,7 @@
  *  implied. See the License for the specific language governing
  *  rights and limitations under the License.
  *
- *  Copyright (C) 2021-2023 URUWorks, uruworks@gmail.com.
+ *  Copyright (C) 2021-2024 URUWorks, uruworks@gmail.com.
  *
  *  Important for Unix/Linux needs:
  *    Place the following units/functions at the beginning
@@ -48,6 +48,7 @@ type
   TMPVPlayerRenderMode        = (rmEmbedding, rmOpenGL{$IFDEF SDL2}, rmSDL2{$ENDIF});
   TMPVPlayerRendeFailAction   = (rfSwitchToEmbedding, rfNone);
   TMPVPlayerTrackType         = (ttVideo, ttAudio, ttSubtitle, ttUnknown);
+  TMPVPlayerVideoAspectRatio  = (arDefault, ar4_3, ar16_9, ar185_1, ar235_1);
   TMPVPlayerLogLevel          = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerScreenshotMode    = (smSubtitles, smVideo, smWindow);
   TMPVPlayerNotifyEvent       = procedure(ASender: TObject; AParam: Integer) of object;
@@ -82,6 +83,7 @@ type
     FLogLevel       : TMPVPlayerLogLevel;
     FMPVEvent       : TMPVPlayerThreadEvent;
     FTrackList      : TMPVPlayerTrackList;
+    FAspectRatio    : TMPVPlayerVideoAspectRatio;
     FAutoStart      : Boolean;
     FAutoLoadSub    : Boolean;
     FKeepAspect     : Boolean;
@@ -224,27 +226,29 @@ type
     procedure AddOption(const AValue: String);
     procedure RemoveOption(const AValue: String);
 
+    procedure SetVideoAspectRatio(const AValue: TMPVPlayerVideoAspectRatio);
+    procedure CycleVideoAspectRatio;
+
     procedure SetVideoFilters(const AVideoFilters: TMPVPlayerVideoFilters);
     procedure ClearVideoFilters;
 
     procedure SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters);
     procedure ClearAudioFilters;
 
-    property mpv_handle       : Pmpv_handle               read FMPV_HANDLE;
-    property Error            : mpv_error                 read FError;
-    property ErrorString      : String                    read GetErrorString;
-    property Version          : DWord                     read FVersion;
-    property VersionString    : String                    read GetVersionString;
-    property Initialized      : Boolean                   read FInitialized;
-    property StartOptions     : TStringList               read FStartOptions;
-    property TrackList        : TMPVPlayerTrackList       read FTrackList;
-    property FileName         : String                    read FFileName;
-    property MPVFileName      : String                    read FMPVFileName   write FMPVFileName;
-    property YTDLPFileName    : String                    read FYTDLPFileName write FYTDLPFileName;
-    property SMPTEMode        : Boolean                   read FSMPTEMode     write FSMPTEMode;
-    property RenderFailAction : TMPVPlayerRendeFailAction read FRenderFail    write FRenderFail;
+    property mpv_handle: Pmpv_handle read FMPV_HANDLE;
+    property Error: mpv_error read FError;
+    property ErrorString: String read GetErrorString;
+    property Version: DWord read FVersion;
+    property VersionString: String read GetVersionString;
+    property Initialized: Boolean read FInitialized;
+    property StartOptions: TStringList read FStartOptions;
+    property TrackList: TMPVPlayerTrackList read FTrackList;
+    property FileName: String read FFileName;
+    property MPVFileName: String read FMPVFileName write FMPVFileName;
+    property YTDLPFileName: String read FYTDLPFileName write FYTDLPFileName;
+    property SMPTEMode: Boolean read FSMPTEMode write FSMPTEMode;
     {$IFDEF USETIMER}
-    property Timer         : TTimer read FTimer;
+    property Timer: TTimer read FTimer;
     {$ENDIF}
   published
     property Align;
@@ -312,6 +316,7 @@ type
     property KeepAspect: Boolean read FKeepAspect write FKeepAspect;
     property NoAudioDisplay: Boolean read FNoAudioDisplay write FNoAudioDisplay;
     property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
+    property RenderFailAction : TMPVPlayerRendeFailAction read FRenderFail write FRenderFail;
     property LogLevel: TMPVPlayerLogLevel read FLogLevel write FLogLevel;
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
@@ -322,8 +327,8 @@ type
     property OnSeek: TMPVPlayerNotifyEvent read FOnSeek write FOnSeek;
     property OnPlaybackRestart: TNotifyEvent read FOnPlaybackRestart write FOnPlaybackRestart;
 
-    property OnPlay : TNotifyEvent read FOnPlay  write FOnPlay;
-    property OnStop : TNotifyEvent read FOnStop  write FOnStop;
+    property OnPlay: TNotifyEvent read FOnPlay  write FOnPlay;
+    property OnStop: TNotifyEvent read FOnStop  write FOnStop;
     property OnPause: TNotifyEvent read FOnPause write FOnPause;
     property OnTimeChanged: TMPVPlayerNotifyEvent read FOnTimeChanged write FOnTimeChanged;
     property OnBuffering: TMPVPlayerNotifyEvent read FOnBuffering write FOnBuffering;
@@ -502,9 +507,9 @@ begin
   if not FInitialized then Exit;
 
   if reply_userdata > 0 then
-    FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING, PChar(AValue))
+    FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING, PChar(@AValue))
   else
-    FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_STRING, PChar(AValue));
+    FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_STRING, PChar(@AValue));
 end;
 
 // -----------------------------------------------------------------------------
@@ -661,6 +666,8 @@ begin
   FStartOptions   := TStringList.Create;
   SetLength(FTrackList, 0);
 
+  FAspectRatio    := arDefault;
+
   {$IFDEF WINDOWS}
   FRenderMode     := rmEmbedding;
   {$ELSE}
@@ -776,6 +783,8 @@ begin
 
   if not FYTDLPFileName.IsEmpty then
     mpv_set_option_string(FMPV_HANDLE^, PChar('script-opts'), PChar('ytdl_hook-ytdl_path='+FYTDLPFileName));
+
+  SetVideoAspectRatio(FAspectRatio);
 
   // Set our window handle
   if not SetWID then
@@ -1713,6 +1722,38 @@ begin
   i := FStartOptions.IndexOfName(Copy(AValue, 1, Pos('=', AValue)));
   if i > -1 then
     FStartOptions.Delete(i);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetVideoAspectRatio(const AValue: TMPVPlayerVideoAspectRatio);
+var
+  s: String;
+begin
+  FAspectRatio := AValue;
+  case FAspectRatio of
+    ar4_3   : s := '4:3';
+    ar16_9  : s := '16:9';
+    ar185_1 : s := '1.85:1';
+    ar235_1 : s := '2.35:1';
+  else
+    s := '-1';
+  end;
+
+  mpv_set_option_string_('video-aspect-override=' + s);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.CycleVideoAspectRatio;
+var
+  i: Integer;
+begin
+  i := Integer(FAspectRatio) + 1;
+  if i > Integer(ar235_1) then i := 0;
+
+  FAspectRatio := TMPVPlayerVideoAspectRatio(i);
+  SetVideoAspectRatio(FAspectRatio);
 end;
 
 // -----------------------------------------------------------------------------
