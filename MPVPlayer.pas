@@ -215,6 +215,10 @@ type
     procedure SetTextHAlign(const AValue: String);
     procedure SetTextVAlign(const AValue: String);
     procedure SetTextSize(const AValue: Int64);
+    procedure SetTextFont(const AValue: String);
+    procedure SetSubtitleColor(const AValue: String);
+    procedure SetSubtitleSize(const AValue: Int64);
+    procedure SetSubtitleFont(const AValue: String);
 
     function GetVideoWidth: Integer;
     function GetVideoHeight: Integer;
@@ -1498,6 +1502,34 @@ end;
 procedure TMPVPlayer.SetTextSize(const AValue: Int64);
 begin
   mpv_set_property_int64('osd-font-size', AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetTextFont(const AValue: String);
+begin
+  mpv_set_option_string_('osd-font='+AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetSubtitleColor(const AValue: String);
+begin
+  mpv_set_option_string_('sub-color='+AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetSubtitleSize(const AValue: Int64);
+begin
+  mpv_set_property_int64('sub-font-size', AValue);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetSubtitleFont(const AValue: String);
+begin
+  mpv_set_option_string_('sub-font='+AValue);
 end;
 
 // -----------------------------------------------------------------------------
