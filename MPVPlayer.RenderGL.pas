@@ -55,6 +55,7 @@ type
     mpvfbo           : mpv_opengl_fbo;
     function InitializeRenderContext: Boolean;
     procedure UnInitializeRenderContext;
+    function IsDestroyingGL: Boolean;
     procedure Update_mpvfbo;
   protected
     procedure TerminatedSet; override;
@@ -210,6 +211,7 @@ begin
     FError := mpv_render_context_create(mpvRenderContext, mpvHandle^, Pmpv_render_param(@mpvRenderParams[0]));
     if FError <> MPV_ERROR_SUCCESS then Exit;
 
+    FGL.MakeCurrent();
     mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Owner);
 
     // Update params
@@ -237,11 +239,19 @@ begin
   begin
     mpv_render_context_set_update_callback(mpvRenderContext^, NIL, NIL);
     mpv_render_context_free(mpvRenderContext^);
+    mpvRenderContext := NIL;
   end;
 
   SetLength(mpvRenderParams, 0);
   SetLength(mpvUpdateParams, 0);
   UnInitialize_libMPV_Render;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayerRenderThread.IsDestroyingGL: Boolean;
+begin
+  Result := (csDestroying in FGL.ComponentState);
 end;
 
 // -----------------------------------------------------------------------------
@@ -261,7 +271,7 @@ begin
   Update_mpvfbo;
   if not Terminated and IsRenderActive then
   begin
-    FGL.MakeCurrent();
+    if not IsDestroyingGL then FGL.MakeCurrent();
     mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
     {$IFDEF BGLCONTROLS}
     if Assigned(FDrawCallback) then
@@ -270,7 +280,7 @@ begin
       FDrawCallback(Self, BGLCanvas);
     end;
     {$ENDIF}
-    if IsRenderActive then FGL.SwapBuffers;
+    if IsRenderActive and not IsDestroyingGL then FGL.SwapBuffers;
   end;
 end;
 
