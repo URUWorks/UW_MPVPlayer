@@ -493,7 +493,7 @@ end;
 
 function TMPVPlayer.mpv_get_property_string_(const APropertyName: String; const reply_userdata: Integer = 0): String;
 begin
-  if FInitialized then
+  if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
       FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING)
@@ -508,7 +508,7 @@ end;
 
 procedure TMPVPlayer.mpv_set_property_string_(const APropertyName: String; const AValue: String; const reply_userdata: Integer = 0);
 begin
-  if not FInitialized then Exit;
+  if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
 
   if reply_userdata > 0 then
     FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING, PChar(@AValue))
@@ -523,7 +523,7 @@ var
   p: Integer;
 begin
   Result := False;
-  if not FInitialized then Exit;
+  if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
 
   if reply_userdata > 0 then
   begin
@@ -543,7 +543,7 @@ procedure TMPVPlayer.mpv_set_property_boolean(const APropertyName: String; const
 var
   p: Integer;
 begin
-  if not FInitialized then Exit;
+  if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
 
   if AValue then
     p := 1
@@ -560,7 +560,7 @@ end;
 
 function TMPVPlayer.mpv_get_property_double(const APropertyName: String; const reply_userdata: Integer = 0): Double;
 begin
-  if FInitialized then
+  if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
       FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_DOUBLE)
@@ -575,7 +575,7 @@ end;
 
 procedure TMPVPlayer.mpv_set_property_double(const APropertyName: String; const AValue: Double; const reply_userdata: Integer = 0);
 begin
-  if FInitialized then
+  if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
       FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_DOUBLE, @AValue)
@@ -588,7 +588,7 @@ end;
 
 function TMPVPlayer.mpv_get_property_int64(const APropertyName: String; const reply_userdata: Integer = 0): Int64;
 begin
-  if FInitialized then
+  if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
       FError := mpv_get_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_INT64)
@@ -603,7 +603,7 @@ end;
 
 procedure TMPVPlayer.mpv_set_property_int64(const APropertyName: String; const AValue: Int64; const reply_userdata: Integer = 0);
 begin
-  if FInitialized then
+  if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
       FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_INT64, @AValue)
@@ -692,7 +692,7 @@ begin
     Sorted     := True;
     Duplicates := dupIgnore;
 
-    Add('osc=no');        // default: yes.
+    Add('osc=no');                  // default: yes.
 //    {$IFDEF WINDOWS}
     Add('hwdec=no');                // fix some windows crash
 //    {$ELSE}
@@ -700,12 +700,12 @@ begin
 //    {$ENDIF}
 //    Add('osd-duration=5000');       // default: 1000.
     Add('keep-open=always');        // don't auto close video.
-    Add('vd-lavc-dr=no');           // fix possibles deadlock issues with OpenGL
+    Add('vd-lavc-dr=no');           // fix possibles deadlock issues with OpenGL.
     Add('hr-seek=yes');             // use precise seeks whenever possible.
     Add('hr-seek-framedrop=no');    // default: yes.
     Add('seekbarkeyframes=no');     // default: yes.
-//    Add('osd-scale-by-window=no'); // scale the OSD with the window size. default: yes.
-    Add('ytdl=yes');                // YouTube downloader
+//    Add('osd-scale-by-window=no');  // scale the OSD with the window size. default: yes.
+    Add('ytdl=yes');                // use YouTube downloader.
   end;
 
   {$IFDEF WINDOWS}
@@ -884,15 +884,16 @@ procedure TMPVPlayer.UnInitialize;
 begin
   if not FInitialized then Exit;
 
-  mpv_command_(['stop']);
-
   {$IFDEF USETIMER}
   FTimer.Enabled := False;
   FLastPos       := -1;
   {$ENDIF}
 
+  if Assigned(mpv_unobserve_property) and Assigned(FMPV_HANDLE) then
+    mpv_unobserve_property(FMPV_HANDLE^, 0);
+
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
-    mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, Self);
+    mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, NIL);
 
   FShowText := '';
   FText := '';
@@ -1070,7 +1071,7 @@ end;
 
 procedure TMPVPlayer.Close;
 begin
-  UnInitialize;
+  mpv_command_(['quit']);
 end;
 
 // -----------------------------------------------------------------------------
