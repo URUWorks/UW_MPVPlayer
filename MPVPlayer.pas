@@ -226,6 +226,7 @@ type
     function GetVideoFPS: Double;
 
     procedure ScreenshotToFile(const AFileName: String; const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo); // name with full path, extension defines the format (file.png)
+    procedure ScreenshotToClipboard(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
 
     procedure AddOption(const AValue: String);
     procedure RemoveOption(const AValue: String);
@@ -351,6 +352,9 @@ procedure Register;
 // -----------------------------------------------------------------------------
 
 implementation
+
+uses
+  Clipbrd;
 
 // -----------------------------------------------------------------------------
 
@@ -1575,6 +1579,28 @@ begin
   end;
 
   mpv_command_(['screenshot-to-file', AFileName, ssm]);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ScreenshotToClipboard(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
+var
+  s : String;
+  p : TPicture;
+begin
+  s := ChangeFileExt(GetTempFileName, '.png');
+  ScreenshotToFile(s, AScreenshotMode);
+  if FileExists(s) then
+  begin
+    p := TPicture.Create;
+    try
+      p.LoadFromFile(s);
+      Clipboard.Assign(p.Bitmap);
+    finally
+      p.Free;
+    end;
+    DeleteFile(s);
+  end;
 end;
 
 // -----------------------------------------------------------------------------
