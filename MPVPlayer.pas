@@ -707,7 +707,6 @@ begin
     Add('vd-lavc-dr=no');           // fix possibles deadlock issues with OpenGL.
     Add('hr-seek=yes');             // use precise seeks whenever possible.
     Add('hr-seek-framedrop=no');    // default: yes.
-    Add('seekbarkeyframes=no');     // default: yes.
 //    Add('osd-scale-by-window=no');  // scale the OSD with the window size. default: yes.
     Add('ytdl=yes');                // use YouTube downloader.
   end;
