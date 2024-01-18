@@ -177,7 +177,7 @@ begin
       InvalidateContext;
     end
     else
-      while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) and IsRenderActive do
+      while IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
       begin
         InvalidateContext;
         mpv_render_context_report_swap(mpvRenderContext^);
