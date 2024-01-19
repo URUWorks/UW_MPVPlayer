@@ -315,6 +315,7 @@ begin
   if Assigned(FThread) then
   begin
     FThread.Terminate;
+    FThread.WaitFor;
     FThread := NIL;
   end;
 end;
