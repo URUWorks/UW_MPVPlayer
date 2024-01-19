@@ -184,7 +184,7 @@ type
 
     procedure Play(const AFileName: String; const AStartAtPositionMs: Integer = 0); overload;
     procedure Play(const FromMs: Integer); overload;
-    procedure Close;
+    procedure Close(const AForce: Boolean = True);
     procedure Loop(const AStartTimeMs, BFinalTimeMs: Integer; const ALoopCount: Integer = -1);
     procedure Pause;
     procedure Resume(const ForcePlay: Boolean = False);
@@ -696,18 +696,17 @@ begin
     Sorted     := True;
     Duplicates := dupIgnore;
 
-    Add('osc=no');                  // default: yes.
-//    {$IFDEF WINDOWS}
+    //{$IFDEF WINDOWS}
     Add('hwdec=no');                // fix some windows crash
-//    {$ELSE}
-//    Add('hwdec=auto');              // enable best hw decoder.
-//    {$ENDIF}
-//    Add('osd-duration=5000');       // default: 1000.
+    //{$ELSE}
+    //Add('hwdec=auto');              // enable best hw decoder.
+    //{$ENDIF}
+    Add('osc=no');                  // default: yes.
     Add('keep-open=always');        // don't auto close video.
     Add('vd-lavc-dr=no');           // fix possibles deadlock issues with OpenGL.
     Add('hr-seek=yes');             // use precise seeks whenever possible.
     Add('hr-seek-framedrop=no');    // default: yes.
-//    Add('osd-scale-by-window=no');  // scale the OSD with the window size. default: yes.
+    //Add('osd-scale-by-window=no');  // scale the OSD with the window size. default: yes.
     Add('ytdl=yes');                // use YouTube downloader.
   end;
 
@@ -944,6 +943,12 @@ begin
 
   FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
   Result := FRenderGL.Active;
+
+  if Result then
+  begin
+    mpv_set_option_string_('vo=libmpv');
+    mpv_set_option_string_('gpu-hwdec-interop=auto');
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -1072,9 +1077,12 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.Close;
+procedure TMPVPlayer.Close(const AForce: Boolean = True);
 begin
-  mpv_command_(['quit']);
+  if AForce then
+    UnInitialize
+  else
+    mpv_command_(['quit']);
 end;
 
 // -----------------------------------------------------------------------------
