@@ -18,6 +18,7 @@ type
     Button3: TButton;
     Button4: TButton;
     Button5: TButton;
+    Button6: TButton;
     Label1: TLabel;
     Label2: TLabel;
     Memo1: TMemo;
@@ -30,6 +31,7 @@ type
     procedure Button3Click(Sender: TObject);
     procedure Button4Click(Sender: TObject);
     procedure Button5Click(Sender: TObject);
+    procedure Button6Click(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure mpvBuffering(ASender: TObject; AParam: Integer);
     procedure mpvDraw(Sender: TObject; ABGLCanvas: TBGLCustomCanvas);
@@ -83,6 +85,11 @@ end;
 procedure TForm1.Button5Click(Sender: TObject);
 begin
   mpv.Play('http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
+end;
+
+procedure TForm1.Button6Click(Sender: TObject);
+begin
+  mpv.Close;
 end;
 
 procedure TForm1.FormCreate(Sender: TObject);
