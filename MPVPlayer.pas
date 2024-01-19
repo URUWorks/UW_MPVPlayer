@@ -232,7 +232,7 @@ type
     procedure RemoveOption(const AValue: String);
 
     procedure SetVideoAspectRatio(const AValue: TMPVPlayerVideoAspectRatio);
-    procedure CycleVideoAspectRatio;
+    function CycleVideoAspectRatio: TMPVPlayerVideoAspectRatio;
 
     procedure SetVideoFilters(const AVideoFilters: TMPVPlayerVideoFilters);
     procedure ClearVideoFilters;
@@ -319,6 +319,7 @@ type
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
     property KeepAspect: Boolean read FKeepAspect write FKeepAspect;
+    property AspectRatio: TMPVPlayerVideoAspectRatio read FAspectRatio write SetVideoAspectRatio;
     property NoAudioDisplay: Boolean read FNoAudioDisplay write FNoAudioDisplay;
     property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
     property RenderFailAction : TMPVPlayerRendeFailAction read FRenderFail write FRenderFail;
@@ -1811,7 +1812,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.CycleVideoAspectRatio;
+function TMPVPlayer.CycleVideoAspectRatio: TMPVPlayerVideoAspectRatio;
 var
   i: Integer;
 begin
@@ -1820,6 +1821,7 @@ begin
 
   FAspectRatio := TMPVPlayerVideoAspectRatio(i);
   SetVideoAspectRatio(FAspectRatio);
+  Result := FAspectRatio;
 end;
 
 // -----------------------------------------------------------------------------
