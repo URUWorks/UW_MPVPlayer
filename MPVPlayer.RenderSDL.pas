@@ -296,8 +296,8 @@ destructor TMPVPlayerRenderSDL.Destroy;
 begin
   if Assigned(FThread) then
   begin
-    FThread.IsRenderActive := False;
     FThread.Terminate;
+    FThread.WaitFor;
     FThread := NIL;
   end;
 
