@@ -185,7 +185,7 @@ uses ctypes, libMPV.Client;
     }
 type
   Pmpv_render_context = ^mpv_render_context;
-  mpv_render_context = record end;
+  mpv_render_context = Pointer;
 
   {*
    * Parameters for mpv_render_param (which is used in a few places such as
@@ -487,7 +487,7 @@ type
   Pmpv_render_param = ^mpv_render_param;
   mpv_render_param = record
     _type : mpv_render_param_type;
-    data  : pointer;
+    data  : Pointer;
   end;
 
   {*
