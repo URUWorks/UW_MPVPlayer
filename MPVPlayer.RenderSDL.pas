@@ -297,7 +297,9 @@ begin
   if Assigned(FThread) then
   begin
     FThread.Terminate;
+    {$IFDEF WINDOWS}
     FThread.WaitFor;
+    {$ENDIF}
     FThread := NIL;
   end;
 
