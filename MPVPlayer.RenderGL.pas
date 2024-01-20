@@ -54,7 +54,6 @@ type
   private
     FGL              : TUWOpenGLControl;
     FError           : mpv_error;
-    FCS              : TRTLCriticalSection;
     mpvHandle        : Pmpv_handle;
     mpvRenderParams  : array of mpv_render_param;
     mpvUpdateParams  : array of mpv_render_param;
@@ -243,8 +242,6 @@ begin
     mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
     mpvUpdateParams[2].Data  := NIL;
 
-    InitCriticalSection(FCS);
-
     IsRenderActive := True;
     Result := True;
   finally
@@ -262,8 +259,6 @@ begin
     mpv_render_context_free(mpvRenderContext^);
     mpvRenderContext := NIL;
   end;
-
-  DoneCriticalSection(FCS);
 
   SetLength(mpvRenderParams, 0);
   SetLength(mpvUpdateParams, 0);
@@ -294,21 +289,16 @@ begin
   Update_mpvfbo;
   if not Terminated and IsRenderActive then
   begin
-    EnterCriticalSection(FCS);
-    try
-      if not IsDestroyingGL then FGL.MakeCurrent();
-      mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-      {$IFDEF BGLCONTROLS}
-      if Assigned(FDrawCallback) then
-      begin
-        BGLViewPort(FGL.ClientWidth, FGL.ClientHeight);
-        FDrawCallback(Self, BGLCanvas);
-      end;
-      {$ENDIF}
-      if IsRenderActive and not IsDestroyingGL then FGL.SwapBuffers;
-    finally
-      LeaveCriticalSection(FCS);
+    if not IsDestroyingGL then FGL.MakeCurrent();
+    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
+    {$IFDEF BGLCONTROLS}
+    if Assigned(FDrawCallback) then
+    begin
+      BGLViewPort(FGL.ClientWidth, FGL.ClientHeight);
+      FDrawCallback(Self, BGLCanvas);
     end;
+    {$ENDIF}
+    if IsRenderActive and not IsDestroyingGL then FGL.SwapBuffers;
   end;
 end;
 
