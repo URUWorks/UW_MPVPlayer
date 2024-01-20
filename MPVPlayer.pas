@@ -77,7 +77,7 @@ type
     FMPV_HANDLE     : Pmpv_handle;
     FError          : mpv_error;
     FVersion        : DWord;
-    FGL             : TOpenGLControl;
+    FGL             : TUWOpenGLControl;
     FInitialized    : Boolean;
     FStartOptions   : TStringList;
     FLogLevel       : TMPVPlayerLogLevel;
@@ -157,7 +157,7 @@ type
     procedure DoTimer(Sender: TObject);
     {$ENDIF}
 
-    procedure DoResize(Sender: TObject);
+    procedure DoOnPaint(Sender: TObject);
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -697,14 +697,11 @@ begin
     Sorted     := True;
     Duplicates := dupIgnore;
 
-    //{$IFDEF WINDOWS}
-    Add('hwdec=no');                // fix some windows crash
-    //{$ELSE}
-    //Add('hwdec=auto');              // enable best hw decoder.
-    //{$ENDIF}
+    Add('hwdec=no');
+    //Add('hwdec=auto-safe');       // enable best hw decoder. white-list ie: hwdec-codecs=h264,vc1,hevc,vp8,av1,prores
+    Add('vd-lavc-dr=no');           // enable direct rendering (default: auto).
     Add('osc=no');                  // default: yes.
     Add('keep-open=always');        // don't auto close video.
-    Add('vd-lavc-dr=no');           // fix possibles deadlock issues with OpenGL.
     Add('hr-seek=yes');             // use precise seeks whenever possible.
     Add('hr-seek-framedrop=no');    // default: yes.
     //Add('osd-scale-by-window=no');  // scale the OSD with the window size. default: yes.
@@ -934,13 +931,13 @@ end;
 
 function TMPVPlayer.InitializeRenderGL: Boolean;
 begin
-  FGL         := TOpenGLControl.Create(Self);
+  FGL         := TUWOpenGLControl.Create(Self);
   FGL.Parent  := Self;
   FGL.Align   := alClient;
   FGL.OnClick := OnClick;
   FGL.OnMouseWheelUp   := OnMouseWheelUp;
   FGL.OnMouseWheelDown := OnMouseWheelDown;
-  FGL.OnResize := @DoResize; // force to draw opengl context when paused
+  FGL.OnPaint := @DoOnPaint; // force to draw opengl context when paused
 
   FRenderGL := TMPVPlayerRenderGL.Create(FGL, FMPV_HANDLE {$IFDEF BGLCONTROLS}, FOnDrawEvent{$ENDIF});
   Result := FRenderGL.Active;
@@ -1766,7 +1763,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.DoResize(Sender: TObject);
+procedure TMPVPlayer.DoOnPaint(Sender: TObject);
 begin
   if Assigned(FRenderGL) and not IsPlaying then
     FRenderGL.Render(True);

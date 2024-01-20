@@ -35,6 +35,13 @@ uses
 
 type
 
+  { TUWOpenGLControl }
+
+  TUWOpenGLControl = class(TOpenGLControl)
+  public
+    procedure Paint; override;
+  end;
+
   {$IFDEF BGLCONTROLS}
   TMPVPlayerDrawEvent = procedure (Sender: TObject; ABGLCanvas: TBGLCustomCanvas) of object;
   {$ENDIF}
@@ -45,8 +52,9 @@ type
 
   TMPVPlayerRenderThread = class(TThread)
   private
-    FGL              : TOpenGLControl;
+    FGL              : TUWOpenGLControl;
     FError           : mpv_error;
+    FCS              : TRTLCriticalSection;
     mpvHandle        : Pmpv_handle;
     mpvRenderParams  : array of mpv_render_param;
     mpvUpdateParams  : array of mpv_render_param;
@@ -68,7 +76,7 @@ type
     {$IFDEF BGLCONTROLS}
     FDrawCallback: TMPVPlayerDrawEvent;
     {$ENDIF}
-    constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+    constructor Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Execute; override;
     procedure InvalidateContext;
@@ -81,7 +89,7 @@ type
     FThread : TMPVPlayerRenderThread;
     function GetRenderActive: Boolean;
   public
-    constructor Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+    constructor Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Terminate;
     procedure Render(const ForceInvalidate: Boolean = False);
@@ -92,6 +100,18 @@ type
 // -----------------------------------------------------------------------------
 
 implementation
+
+// -----------------------------------------------------------------------------
+
+{ TUWOpenGLControl }
+
+// -----------------------------------------------------------------------------
+
+procedure TUWOpenGLControl.Paint;
+begin
+  if Assigned(OnPaint) then
+    OnPaint(Self);
+end;
 
 // -----------------------------------------------------------------------------
 
@@ -120,7 +140,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderThread.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+constructor TMPVPlayerRenderThread.Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
   inherited Create(True);
 
@@ -211,7 +231,6 @@ begin
     FError := mpv_render_context_create(mpvRenderContext, mpvHandle^, Pmpv_render_param(@mpvRenderParams[0]));
     if FError <> MPV_ERROR_SUCCESS then Exit;
 
-    FGL.MakeCurrent();
     mpv_render_context_set_update_callback(mpvRenderContext^, @LIBMPV_RENDER_EVENT, Owner);
 
     // Update params
@@ -223,6 +242,8 @@ begin
     mpvUpdateParams[1].Data  := @MPV_RENDER_PARAM_ADVANCED_CONTROL_ENABLED;
     mpvUpdateParams[2]._type := MPV_RENDER_PARAM_INVALID;
     mpvUpdateParams[2].Data  := NIL;
+
+    InitCriticalSection(FCS);
 
     IsRenderActive := True;
     Result := True;
@@ -241,6 +262,8 @@ begin
     mpv_render_context_free(mpvRenderContext^);
     mpvRenderContext := NIL;
   end;
+
+  DoneCriticalSection(FCS);
 
   SetLength(mpvRenderParams, 0);
   SetLength(mpvUpdateParams, 0);
@@ -271,16 +294,21 @@ begin
   Update_mpvfbo;
   if not Terminated and IsRenderActive then
   begin
-    if not IsDestroyingGL then FGL.MakeCurrent();
-    mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
-    {$IFDEF BGLCONTROLS}
-    if Assigned(FDrawCallback) then
-    begin
-      BGLViewPort(FGL.ClientWidth, FGL.ClientHeight);
-      FDrawCallback(Self, BGLCanvas);
+    EnterCriticalSection(FCS);
+    try
+      if not IsDestroyingGL then FGL.MakeCurrent();
+      mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
+      {$IFDEF BGLCONTROLS}
+      if Assigned(FDrawCallback) then
+      begin
+        BGLViewPort(FGL.ClientWidth, FGL.ClientHeight);
+        FDrawCallback(Self, BGLCanvas);
+      end;
+      {$ENDIF}
+      if IsRenderActive and not IsDestroyingGL then FGL.SwapBuffers;
+    finally
+      LeaveCriticalSection(FCS);
     end;
-    {$ENDIF}
-    if IsRenderActive and not IsDestroyingGL then FGL.SwapBuffers;
   end;
 end;
 
@@ -290,7 +318,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderGL.Create(AControl: TOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+constructor TMPVPlayerRenderGL.Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
   if Initialize_libMPV_Render(hLibMPV) then
   begin
