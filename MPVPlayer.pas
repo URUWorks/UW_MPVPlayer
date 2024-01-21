@@ -1628,7 +1628,7 @@ begin
   while True do
   begin
     Event := mpv_wait_event(FMPV_HANDLE^, 0);
-    if (Event = NIL) or (Event^.event_id = MPV_EVENT_NONE) then Break;
+    if (Event = NIL) or (Event^.event_id = MPV_EVENT_NONE) then Exit;
 
     case (Event^.event_id) of
       MPV_EVENT_SHUTDOWN:
