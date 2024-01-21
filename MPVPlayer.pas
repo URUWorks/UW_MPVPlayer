@@ -88,6 +88,7 @@ type
     FAutoLoadSub    : Boolean;
     FKeepAspect     : Boolean;
     FNoAudioDisplay : Boolean;
+    FUseHWDec       : Boolean;
     FSMPTEMode      : Boolean;
     FRenderFail     : TMPVPlayerRendeFailAction;
     FStartAtPosMs   : Integer;
@@ -150,7 +151,8 @@ type
     {$ENDIF}
 
     function SetWID: Boolean;
-    procedure SetRenderMode(Value: TMPVPlayerRenderMode);
+    procedure SetRenderMode(const AValue: TMPVPlayerRenderMode);
+    procedure SetHWDec(const AValue: Boolean);
     function LogLevelToString: String;
 
     {$IFDEF USETIMER}
@@ -176,18 +178,18 @@ type
     procedure mpv_set_property_double(const APropertyName: String; const AValue: Double; const reply_userdata: Integer = 0);
     function mpv_get_property_int64(const APropertyName: String; const reply_userdata: Integer = 0): Int64;
     procedure mpv_set_property_int64(const APropertyName: String; const AValue: Int64; const reply_userdata: Integer = 0);
-    procedure mpv_set_pause(const Value: Boolean);
+    procedure mpv_set_pause(const AValue: Boolean);
 
     function GetErrorString: String;
     function GetVersionString: String;
     function GetPlayerHandle: Pmpv_handle;
 
     procedure Play(const AFileName: String; const AStartAtPositionMs: Integer = 0); overload;
-    procedure Play(const FromMs: Integer); overload;
+    procedure Play(const AFromMs: Integer); overload;
     procedure Close(const AForce: Boolean = True);
     procedure Loop(const AStartTimeMs, BFinalTimeMs: Integer; const ALoopCount: Integer = -1);
     procedure Pause;
-    procedure Resume(const ForcePlay: Boolean = False);
+    procedure Resume(const AForcePlay: Boolean = False);
     procedure Stop;
     function IsMediaLoaded: Boolean;
     function IsPlaying: Boolean;
@@ -323,6 +325,7 @@ type
     property NoAudioDisplay: Boolean read FNoAudioDisplay write FNoAudioDisplay;
     property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
     property RenderFailAction : TMPVPlayerRendeFailAction read FRenderFail write FRenderFail;
+    property UseHWDec : Boolean read FUseHWDec write SetHWDec;
     property LogLevel: TMPVPlayerLogLevel read FLogLevel write FLogLevel;
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
@@ -619,10 +622,10 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.mpv_set_pause(const Value: Boolean);
+procedure TMPVPlayer.mpv_set_pause(const AValue: Boolean);
 begin
-  mpv_set_property_boolean('pause', Value);
-  case Value of
+  mpv_set_property_boolean('pause', AValue);
+  case AValue of
     True  : if Assigned(FOnPause) then FOnPause(Self);
     False : if Assigned(FOnPlay) then FOnPlay(Self);
   end;
@@ -662,6 +665,7 @@ begin
   FAutoLoadSub    := False;
   FKeepAspect     := True;
   FNoAudioDisplay := False;
+  FUseHWDec       := False;
   FSMPTEMode      := False;
   FRenderFail     := rfNone;
   FPausePosMs     := -1;
@@ -698,7 +702,7 @@ begin
     Duplicates := dupIgnore;
 
     Add('hwdec=no');
-    //Add('hwdec=auto-safe');       // enable best hw decoder. white-list ie: hwdec-codecs=h264,vc1,hevc,vp8,av1,prores
+    //Add('hwdec=auto-safe  ');       // enable best hw decoder. white-list ie: hwdec-codecs=h264,vc1,hevc,vp8,av1,prores
     Add('vd-lavc-dr=no');           // enable direct rendering (default: auto).
     Add('osc=no');                  // default: yes.
     Add('keep-open=always');        // don't auto close video.
@@ -1067,9 +1071,9 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.Play(const FromMs: Integer);
+procedure TMPVPlayer.Play(const AFromMs: Integer);
 begin
-  SeekInMs(FromMs);
+  SeekInMs(AFromMs);
   Resume(True);
 end;
 
@@ -1123,9 +1127,9 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.Resume(const ForcePlay: Boolean = False);
+procedure TMPVPlayer.Resume(const AForcePlay: Boolean = False);
 begin
-  if ForcePlay or IsPaused then
+  if AForcePlay or IsPaused then
   begin
     if GetMediaPosInMs = GetMediaLenInMs then
       SetMediaPosInMs(0);
@@ -1735,13 +1739,34 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.SetRenderMode(Value: TMPVPlayerRenderMode);
+procedure TMPVPlayer.SetRenderMode(const AValue: TMPVPlayerRenderMode);
 begin
-  if not FInitialized and (FRenderMode <> Value) then
-    FRenderMode := Value;
+  if not FInitialized and (FRenderMode <> AValue) then
+    FRenderMode := AValue;
 end;
 
 // -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetHWDec(const AValue: Boolean);
+var
+  s: String;
+begin
+  if AValue <> FUseHWDec then
+  begin
+    FUseHWDec := AValue;
+    if FUseHWDec then
+      s := 'auto-safe'
+    else
+      s := 'no';
+
+    s := 'hwdec=' + s;
+    AddOption(s);
+    mpv_set_option_string_(s);
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
 
 {$IFDEF USETIMER}
 procedure TMPVPlayer.DoTimer(Sender: TObject);
