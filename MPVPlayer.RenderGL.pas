@@ -130,7 +130,8 @@ end;
 
 procedure LIBMPV_RENDER_EVENT(Sender: Pointer); cdecl;
 begin
-  if (Sender <> NIL) then TMPVPlayerRenderGL(Sender).Render;
+  if (Sender <> NIL) then
+    TMPVPlayerRenderGL(Sender).Render;
 end;
 
 // -----------------------------------------------------------------------------
@@ -144,9 +145,9 @@ begin
   inherited Create(True);
 
   FreeOnTerminate := True;
-  Event     := RTLEventCreate;
-  Owner     := AOwner;
-  mpvHandle := AHandle;
+  Event           := RTLEventCreate;
+  Owner           := AOwner;
+  mpvHandle       := AHandle;
   {$IFDEF BGLCONTROLS}
   FDrawCallback := ADrawCallback;
   {$ENDIF}
@@ -196,7 +197,7 @@ begin
       InvalidateContext;
     end
     else
-      while IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
+      if ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then //while IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) do
       begin
         InvalidateContext;
         mpv_render_context_report_swap(mpvRenderContext^);
@@ -278,8 +279,8 @@ procedure TMPVPlayerRenderThread.Update_mpvfbo;
 begin
   mpvfbo.internal_format := 0;
   mpvfbo.fbo := 0;
-  mpvfbo.w   := FGL.ClientWidth;
-  mpvfbo.h   := FGL.ClientHeight;
+  mpvfbo.w := FGL.ClientWidth;
+  mpvfbo.h := FGL.ClientHeight;
 end;
 
 // -----------------------------------------------------------------------------
@@ -289,7 +290,9 @@ begin
   Update_mpvfbo;
   if not Terminated and IsRenderActive then
   begin
-    if not IsDestroyingGL then FGL.MakeCurrent();
+    if not IsDestroyingGL then
+      FGL.MakeCurrent();
+
     mpv_render_context_render(mpvRenderContext^, Pmpv_render_param(@mpvUpdateParams[0]));
     {$IFDEF BGLCONTROLS}
     if Assigned(FDrawCallback) then
@@ -298,7 +301,9 @@ begin
       FDrawCallback(Self, BGLCanvas);
     end;
     {$ENDIF}
-    if IsRenderActive and not IsDestroyingGL then FGL.SwapBuffers;
+
+    if IsRenderActive and not IsDestroyingGL then
+      FGL.SwapBuffers;
   end;
 end;
 
