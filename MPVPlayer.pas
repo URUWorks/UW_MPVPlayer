@@ -101,11 +101,11 @@ type
     FLastPos        : Integer;
     {$ENDIF}
 
-    FRenderMode     : TMPVPlayerRenderMode;
-    FRenderGL       : TMPVPlayerRenderGL;
+    FRenderMode : TMPVPlayerRenderMode;
+    FRenderGL   : TMPVPlayerRenderGL;
 
     {$IFDEF SDL2}
-    FRenderSDL      : TMPVPlayerRenderSDL;
+    FRenderSDL : TMPVPlayerRenderSDL;
     {$ENDIF}
 
     FShowText       : String;
@@ -114,7 +114,10 @@ type
     FTextNodeList   : mpv_node_list;
     FTextNodeKeys   : array of PChar;
     FTextNodeValues : array of mpv_node;
-    FBackImage: TPicture;
+
+    {$IFDEF ENABLE_BACKIMAGE}
+    FBackImage : TPicture;
+    {$ENDIF}
 
     FOnStartFile: TNotifyEvent;                        // Notification before playback start of a file (before the file is loaded).
     FOnEndFile: TMPVPlayerNotifyEvent;                 // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
@@ -164,7 +167,10 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+
+    {$IFDEF ENABLE_BACKIMAGE}
     procedure EraseBackground(DC: HDC); override;
+    {$ENDIF}
 
     function IsLibMPVAvailable: Boolean;
 
@@ -327,9 +333,12 @@ type
     property NoAudioDisplay: Boolean read FNoAudioDisplay write FNoAudioDisplay;
     property RendererMode: TMPVPlayerRenderMode read FRenderMode write SetRenderMode;
     property RenderFailAction : TMPVPlayerRendeFailAction read FRenderFail write FRenderFail;
-    property UseHWDec : Boolean read FUseHWDec write SetHWDec;
+    property UseHWDec: Boolean read FUseHWDec write SetHWDec;
     property LogLevel: TMPVPlayerLogLevel read FLogLevel write FLogLevel;
-    property BackImage :TPicture   read FBackImage write FBackImage;
+
+    {$IFDEF ENABLE_BACKIMAGE}
+    property BackImage: TPicture read FBackImage write FBackImage;
+    {$ENDIF}
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
     property OnEndFile: TMPVPlayerNotifyEvent read FOnEndFile write FOnEndFile;
@@ -673,7 +682,6 @@ begin
   FRenderFail     := rfNone;
   FPausePosMs     := -1;
   FFileName       := '';
-  BackImage := TPicture.Create;
   {$IFDEF LINUX}
   FMPVFileName    := '';
   {$ELSE}
@@ -683,14 +691,18 @@ begin
   FStartOptions   := TStringList.Create;
   SetLength(FTrackList, 0);
 
-  FAspectRatio    := arDefault;
+  FAspectRatio := arDefault;
 
   {$IFDEF WINDOWS}
-  FRenderMode     := rmEmbedding;
+  FRenderMode := rmEmbedding;
   {$ELSE}
-  FRenderMode     := rmOpenGL;
+  FRenderMode := rmOpenGL;
   {$ENDIF}
-  FRenderGL       := NIL;
+  FRenderGL := NIL;
+
+  {$IFDEF ENABLE_BACKIMAGE}
+  FBackImage := TPicture.Create;
+  {$ENDIF}
 
   {$IFDEF USETIMER}
   FTimer          := TTimer.Create(NIL);
@@ -727,7 +739,9 @@ destructor TMPVPlayer.Destroy;
 begin
   UnInitialize;
 
+  {$IFDEF ENABLE_BACKIMAGE}
   FBackImage.Free;
+  {$ENDIF}
 
   {$IFDEF USETIMER}
   FTimer.Free;
@@ -751,7 +765,6 @@ var
 begin
   if FInitialized then Exit(True);
 
-  FInitialized := False;
   Result := False;
 
   {$IFDEF WINDOWS}
@@ -1916,48 +1929,61 @@ begin
   SetAudioFilters([]);
 end;
 
+// -----------------------------------------------------------------------------
+
+{$IFDEF ENABLE_BACKIMAGE}
 procedure TMPVPlayer.EraseBackground(DC: HDC);
 var
   FCanvas : TCanvas;
-  R, aRect: TRect;
-  scaledHeight, scaledWidth: Integer;
+  R, aRect : TRect;
+  scaledHeight, scaledWidth : Integer;
 begin
-  FCanvas := (self as TCustomControl).Canvas;
-  aRect := TRect.Create(0,0,Self.width,Self.Height);
-  if ( FCanvas <> nil)  then
+  if FInitialized then
+  begin
+    inherited;
+    Exit;
+  end;
+
+  FCanvas := (Self as TCustomControl).Canvas;
+  aRect := TRect.Create(0, 0, Self.width, Self.Height);
+  if (FCanvas <> NIL) then
     with FCanvas do
     begin
       if DC <> 0 then
         Handle := DC;
-        Brush.Color := Color;
-      if  not (csDesigning in ComponentState) then
-         begin
-           if (FBackImage.Width / FBackImage.Height) > (aRect.Width / aRect.Height) then
-             begin
-              // image is "wide" --> fit image width into cell
-               scaledHeight := round(FBackImage.Height / FBackImage.Width * aRect.Width);
-               R.Left := 0;
-               R.Right := aRect.Right;
-               R.Top := (aRect.Height - scaledHeight) div 2;
-               R.Bottom := (aRect.Height + scaledHeight) div 2;
-             end
-           else
-             begin
-              // image is "high" --> fit image height into cell
-               scaledWidth := round(FBackImage.Width / FBackImage.Height * aRect.Height);
-               R.Top := 0;
-               R.Bottom := aRect.Height;
-               R.Left := (aRect.Width - scaledWidth) div 2;
-               R.Right := (aRect.Width + scaledWidth) div 2;
-             end;
-           Rectangle(0, 0, Self.Width, Self.Height);
-           StretchDraw(R,BackImage.Graphic);
-         end
+
+      Brush.Color := Color;
+
+      if not (csDesigning in ComponentState) then
+      begin
+        if (FBackImage.Width / FBackImage.Height) > (aRect.Width / aRect.Height) then
+        begin
+          // image is "wide" --> fit image width into cell
+          scaledHeight := Round(FBackImage.Height / FBackImage.Width * aRect.Width);
+          R.Left := 0;
+          R.Right := aRect.Right;
+          R.Top := (aRect.Height - scaledHeight) div 2;
+          R.Bottom := (aRect.Height + scaledHeight) div 2;
+        end
+        else
+        begin
+          // image is "high" --> fit image height into cell
+          scaledWidth := Round(FBackImage.Width / FBackImage.Height * aRect.Height);
+          R.Top := 0;
+          R.Bottom := aRect.Height;
+          R.Left := (aRect.Width - scaledWidth) div 2;
+          R.Right := (aRect.Width + scaledWidth) div 2;
+        end;
+        Rectangle(0, 0, Self.Width, Self.Height);
+        StretchDraw(R, BackImage.Graphic);
+      end
       else
-           DrawFocusRect(aRect);
+        DrawFocusRect(aRect);
+
       if DC <> 0 then Handle := 0;
     end;
 end;
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
