@@ -2,7 +2,7 @@
 [![discord](https://img.shields.io/badge/Discord-blue)](https://discord.gg/EqzXEa8pHK)
 [![ko-fi](https://img.shields.io/badge/Ko--fi-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/uruworks)
 
-###  A [libmpv](https://mpv.io/) media player control for Lazarus.
+###  A [libmpv](https://mpv.io/) media player control for Lazarus
 
 Powerful multimedia playback engine. 
 It supports a wide variety of media file formats, audio and video codecs, and subtitle types.
