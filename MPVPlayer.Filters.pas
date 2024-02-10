@@ -40,6 +40,7 @@ type
     vfEmboss,
     vfNegative,
     vfVintage,
+    vfDeinterlace,
     vfHistogram,
     vfOscilloscope,
     vfSafeAreaLines
@@ -70,7 +71,7 @@ type
 
 const
 
-  TMPVPlayerVideoFiltersInfo : array[0..10] of TMPVPlayerFilterInfo =
+  TMPVPlayerVideoFiltersInfo : array[0..11] of TMPVPlayerFilterInfo =
   (
     (Name: 'hflip'; Params: ''), // vfHFlip
     (Name: 'vflip'; Params: ''), // vfVFlip
@@ -80,6 +81,7 @@ const
     (Name: 'convolution'; Params: '-2 -1 0 -1 1 1 0 1 2:-2 -1 0 -1 1 1 0 1 2:-2 -1 0 -1 1 1 0 1 2:-2 -1 0 -1 1 1 0 1 2'), // vfEmboss
     (Name: 'curves'; Params: 'preset=color_negative'), // vfNegative
     (Name: 'curves'; Params: 'preset=vintage'), // vfVintage
+    (Name: 'bwdif'; Params: ''), // vfDeinterlace
     (Name: 'histogram'; Params: ''), // vfHistogram
     (Name: 'oscilloscope'; Params: 'x=0.5:y=0:s=1'), // vfOscilloscope
     (Name: 'drawbox'; Params: 'x=(iw-iw*0.95)/2:y=(ih-ih*0.95)/2:w=iw*0.95:h=ih*0.95:t=1:color=Red@0.4,drawbox=x=(iw-iw*0.9)/2:y=(ih-ih*0.9)/2:w=iw*0.9:h=ih*0.9:t=1:color=Green@0.6') // vfSafeAreaLines
