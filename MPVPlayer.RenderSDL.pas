@@ -141,7 +141,7 @@ end;
 
 procedure TMPVPlayerRenderThread.Execute;
 begin
-  while not Terminated and IsRenderActive do
+  while not Terminated do
   begin
     RTLEventWaitFor(Event);
 
@@ -150,9 +150,8 @@ begin
       ForceInvalidateContext := False;
       InvalidateContext;
     end
-    else
-      while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
-        InvalidateContext;
+    else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then //while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
+      InvalidateContext;
 
     RTLEventResetEvent(Event);
   end;
@@ -310,7 +309,7 @@ end;
 
 procedure TMPVPlayerRenderSDL.Render(const ForceInvalidate: Boolean = False);
 begin
-  if Assigned(FThread) and (FThread.IsRenderActive) then
+  if Assigned(FThread) then
   begin
     FThread.ForceInvalidateContext := ForceInvalidate;
     RTLEventSetEvent(FThread.Event);
