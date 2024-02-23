@@ -1136,6 +1136,8 @@ end;
 
 procedure TMPVPlayer.Pause;
 begin
+  if not FInitialized then Exit;
+
   Loop(0, 0);
 
   if IsPlaying then
@@ -1148,9 +1150,11 @@ end;
 
 procedure TMPVPlayer.Resume(const AForcePlay: Boolean = False);
 begin
+  if not FInitialized then Exit;
+
   if AForcePlay or IsPaused then
   begin
-    if GetMediaPosInMs = GetMediaLenInMs then
+    if GetMediaPosInMs >= GetMediaLenInMs then
       SetMediaPosInMs(0);
 
     FPausePosMs := -1;
@@ -1162,6 +1166,8 @@ end;
 
 procedure TMPVPlayer.Stop;
 begin
+  if not FInitialized then Exit;
+
   Loop(0, 0);
 
   if not IsPaused then
@@ -1809,7 +1815,7 @@ end;
 
 procedure TMPVPlayer.DoOnPaint(Sender: TObject);
 begin
-  if Assigned(FRenderGL) and not IsPlaying then
+  if Assigned(FRenderGL) and IsMediaLoaded and not IsPlaying then
     FRenderGL.Render(True);
 end;
 

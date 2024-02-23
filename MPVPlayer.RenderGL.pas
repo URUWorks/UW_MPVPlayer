@@ -78,7 +78,7 @@ type
     constructor Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle; AOwner: TMPVPlayerRenderGL {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Execute; override;
-    procedure InvalidateContext;
+    procedure InvalidateContext(const AReportSwap: Boolean = True);
   end;
 
   { TMPVPlayerRenderGL }
@@ -194,14 +194,10 @@ begin
     if ForceInvalidateContext then
     begin
       ForceInvalidateContext := False;
-      InvalidateContext;
+      InvalidateContext(False);
     end
-    else
-      if ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then //while IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) do
-      begin
-        InvalidateContext;
-        mpv_render_context_report_swap(mpvRenderContext^);
-      end;
+    else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then //while IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) do
+      InvalidateContext;
 
     RTLEventResetEvent(Event);
   end;
@@ -285,7 +281,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayerRenderThread.InvalidateContext;
+procedure TMPVPlayerRenderThread.InvalidateContext(const AReportSwap: Boolean = True);
 begin
   Update_mpvfbo;
   if not Terminated and IsRenderActive then
@@ -303,7 +299,12 @@ begin
     {$ENDIF}
 
     if IsRenderActive and not IsDestroyingGL then
+    begin
       FGL.SwapBuffers;
+
+      if AReportSwap  then
+        mpv_render_context_report_swap(mpvRenderContext^);
+    end;
   end;
 end;
 
@@ -349,7 +350,7 @@ end;
 
 procedure TMPVPlayerRenderGL.Render(const ForceInvalidate: Boolean = False);
 begin
-  if Assigned(FThread) and FThread.IsRenderActive then
+  if Assigned(FThread) then
   begin
     FThread.ForceInvalidateContext := ForceInvalidate;
     RTLEventSetEvent(FThread.Event);
