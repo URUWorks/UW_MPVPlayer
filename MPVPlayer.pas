@@ -52,6 +52,7 @@ type
   TMPVPlayerLogLevel          = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerScreenshotMode    = (smSubtitles, smVideo, smWindow);
   TMPVPlayerNotifyEvent       = procedure(ASender: TObject; AParam: Integer) of object;
+  TMPVPlayerEndFileEvent      = procedure(ASender: TObject; AReason, AError: Integer) of object;
   TMPVPlayerLogEvent          = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
   TMPVPlayerGetReplyEvent     = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error; event_property: Pmpv_event_property) of object;
   TMPVPlayerSetReplyEvent     = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error) of object;
@@ -120,7 +121,7 @@ type
     {$ENDIF}
 
     FOnStartFile: TNotifyEvent;                        // Notification before playback start of a file (before the file is loaded).
-    FOnEndFile: TMPVPlayerNotifyEvent;                 // Notification after playback end (after the file was unloaded), AParam is mpv_end_file_reason.
+    FOnEndFile: TMPVPlayerEndFileEvent;                // Notification after playback end (after the file was unloaded).
     FOnFileLoaded: TNotifyEvent;                       // Notification when the file has been loaded (headers were read etc.)
     FOnVideoReconfig: TNotifyEvent;                    // Happens after video changed in some way.
     FOnAudioReconfig: TNotifyEvent;                    // Similar to VIDEO_RECONFIG.
@@ -341,7 +342,7 @@ type
     {$ENDIF}
 
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
-    property OnEndFile: TMPVPlayerNotifyEvent read FOnEndFile write FOnEndFile;
+    property OnEndFile: TMPVPlayerEndFileEvent read FOnEndFile write FOnEndFile;
     property OnFileLoaded: TNotifyEvent read FOnFileLoaded write FOnFileLoaded;
     property OnVideoReconfig: TNotifyEvent read FOnVideoReconfig write FOnVideoReconfig;
     property OnAudioReconfig: TNotifyEvent read FOnAudioReconfig write FOnAudioReconfig;
@@ -1699,7 +1700,8 @@ begin
       MPV_EVENT_END_FILE:
       begin
         if Assigned(OnEndFile) then
-          OnEndFile(Sender, Pmpv_event_end_file(Event^.data)^.reason);
+          with Pmpv_event_end_file(Event^.data)^ do
+            OnEndFile(Sender, reason, error);
       end;
 
       MPV_EVENT_VIDEO_RECONFIG:
@@ -1741,7 +1743,7 @@ begin
           if (Pmpv_event_property(Event^.Data)^.data <> NIL) and (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
           begin
             mpv_set_pause(True);
-            if Assigned(OnEndFile) then OnEndFile(Sender, MPV_END_FILE_REASON_EOF);
+            if Assigned(OnEndFile) then OnEndFile(Sender, MPV_END_FILE_REASON_EOF, 0);
           end;
         end
         else if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
