@@ -31,9 +31,11 @@ uses ctypes;
 // -----------------------------------------------------------------------------
 
 const
-  {$IFDEF WINDOWS}LIBMPV_DLL_NAME = 'libmpv-2.dll';{$ENDIF}
-  {$IFDEF LINUX}LIBMPV_DLL_NAME = 'libmpv.so';{$ENDIF}
-  {$IFDEF DARWIN}LIBMPV_DLL_NAME = 'libmpv.1.dylib';{$ENDIF}
+  LIBMPV_DLL_NAME = 'libmpv';
+  LIBMPV_DLL_VER : array[0..3] of AnsiString =
+    (
+    {$IFDEF WINDOWS}'-3', '-2', '-1'{$ELSE}'.3', '.2', '.1'{$ENDIF}, ''
+    );
 
 type
   Pmpv_handle = ^mpv_handle;
@@ -2080,9 +2082,6 @@ var
 
 // -----------------------------------------------------------------------------
 
-{$IFDEF UNIX}
-function libmpv_GetInstallPath: String;
-{$ENDIF}
 procedure Free_libMPV;
 function Load_libMPV(const AFileName: String = ''): Integer;
 
@@ -2100,7 +2099,7 @@ uses
   SysUtils, dynlibs;
 
 {$IFDEF UNIX}
-  function setlocale(category: cint; locale: pchar): pchar; cdecl; external 'c' name 'setlocale';
+function setlocale(category: cint; locale: pchar): pchar; cdecl; external 'c' name 'setlocale';
 {$ENDIF}
 
 // -----------------------------------------------------------------------------
@@ -2119,68 +2118,35 @@ end;
 
 // -----------------------------------------------------------------------------
 
-{$IFDEF UNIX}
-function libmpv_GetInstallPath: String;
-const
-  {$IFDEF LINUX}
-  pathLst : array[0..5] of String = (
-    '/usr/lib',
-    '/lib',
-    '/usr/local/lib',
-    '/lib64',
-    '/usr/lib64',
-    '/usr/lib/x86_64-linux-gnu'
-  );
-  {$ELSE}
-  pathLst : array[0..2] of String = (
-    '/usr/local/lib',
-    '/Desktop/mpv.app/Contents/MacOS',
-    '/Applications/mpv.app/Contents/MacOS'
-    );
-  {$ENDIF}
+function TryLoadLibMPV: TLibHandle;
 var
-  pathIdx : Integer;
-  pathStr : String;
-  sr      : TSearchRec;
-  re      : Integer;
+  i: Byte;
 begin
-  for pathIdx := Low(pathLst) to High(pathLst) do
+  Result := dynlibs.NilHandle;
+
+  for i := Low(LIBMPV_DLL_VER) to High(LIBMPV_DLL_VER) do
   begin
-    pathStr := pathLst[pathIdx];
-    if not DirectoryExists(pathStr) then continue;
-    // look for lib
-    if FileExists(pathStr + PathDelim + LIBMPV_DLL_NAME) then
-    begin
-      Result := pathStr + PathDelim + LIBMPV_DLL_NAME;
-      Exit;
-    end;
-    {$IFDEF LINUX}
-    // look for .so.x
-    re := SysUtils.FindFirst(pathStr + PathDelim + LIBMPV_DLL_NAME + '.*', faAnyFile, sr);
+    {$IFDEF WINDOWS}
+    Result := LoadLibrary(LIBMPV_DLL_NAME + LIBMPV_DLL_VER[i] + '.dll');
     {$ELSE}
-    // look for x.dylib
-    re := SysUtils.FindFirst(pathStr + PathDelim + ChangeFileExt(LIBMPV_DLL_NAME, '') + '.*.dylib', faAnyFile, sr);
-    {$ENDIF}
-    FindClose(sr);
-    if (re = 0) then
-    begin
-      Result := pathStr + PathDelim + sr.Name;
-      Exit;
-    end;
+    {$IFDEF DARWIN}
+    Result := LoadLibrary(LIBMPV_DLL_NAME + LIBMPV_DLL_VER[i] + '.dylib');
+    {$ELSE}
+    Result := LoadLibrary(LIBMPV_DLL_NAME + '.so' + LIBMPV_DLL_VER[i]);
+    {$ENDIF DARWIN}
+    {$ENDIF WINDOWS}
+
+    if Result <> dynlibs.NilHandle then
+      Break;
   end;
-  Result := '';
 end;
-{$ENDIF}
 
 // -----------------------------------------------------------------------------
 
 procedure Free_libMPV;
 begin
-  if hLibMPV <> dynlibs.NilHandle then
-  begin
-    if UnloadLibrary(hLibMPV) then
-      hLibMPV := dynlibs.NilHandle;
-  end;
+  if (hLibMPV <> dynlibs.NilHandle) and UnloadLibrary(hLibMPV) then
+    hLibMPV := dynlibs.NilHandle;
 
   mpv_client_api_version := NIL;
   mpv_error_string := NIL;
@@ -2237,7 +2203,7 @@ begin
   {$ENDIF}
 
   if AFileName.IsEmpty then
-    hLibMPV := LoadLibrary({$IFDEF WINDOWS}LIBMPV_DLL_NAME{$ELSE}libmpv_GetInstallPath{$ENDIF})
+    hLibMPV := TryLoadLibMPV
   else
     hLibMPV := LoadLibrary(AFileName);
 
