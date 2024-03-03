@@ -683,11 +683,7 @@ begin
   FRenderFail     := rfNone;
   FPausePosMs     := -1;
   FFileName       := '';
-  {$IFDEF LINUX}
   FMPVFileName    := '';
-  {$ELSE}
-  FMPVFileName    := LIBMPV_DLL_NAME;
-  {$ENDIF}
   FYTDLPFileName  := '';
   FStartOptions   := TStringList.Create;
   SetLength(FTrackList, 0);
@@ -729,9 +725,7 @@ begin
     Add('ytdl=yes');                // use YouTube downloader.
   end;
 
-  {$IFDEF WINDOWS}
   FError := Load_libMPV(FMPVFileName);
-  {$ENDIF}
 end;
 
 // -----------------------------------------------------------------------------
@@ -751,9 +745,8 @@ begin
   FStartOptions.Free;
   FStartOptions := NIL;
 
-  {$IFDEF WINDOWS}
   Free_libMPV;
-  {$ENDIF}
+
   inherited Destroy;
 end;
 
@@ -768,18 +761,12 @@ begin
 
   Result := False;
 
-  {$IFDEF WINDOWS}
   if not IsLibMPV_Loaded then Exit;
-  {$ELSE}
-  FError := Load_libMPV(FMPVFileName);
-  if FError = MPV_ERROR_UNINITIALIZED then Exit;
-  {$ENDIF}
 
   FMPV_HANDLE := mpv_create();
   if not Assigned(FMPV_HANDLE) then
   begin
     FError := MPV_ERROR_UNSUPPORTED;
-    Free_libMPV;
     Exit;
   end;
 
@@ -946,9 +933,6 @@ begin
   FFileName := '';
   FPausePosMs := -1;
   FInitialized := False;
-  {$IFDEF DARWIN}
-  Free_libMPV;
-  {$ENDIF}
 end;
 
 // -----------------------------------------------------------------------------
