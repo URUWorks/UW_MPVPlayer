@@ -217,6 +217,7 @@ type
     procedure SetTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer); overload;
     procedure SetTrack(const Index: Integer); overload;
     procedure GetTracks;
+    function HasVideoTrack: Boolean;
     procedure LoadTrack(const TrackType: TMPVPlayerTrackType; const AFileName: String);
     procedure RemoveTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
     procedure ReloadTrack(const TrackType: TMPVPlayerTrackType; const ID: Integer = -1);
@@ -1408,6 +1409,19 @@ begin
     end;
     mpv_free_node_contents(Node);
   end;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.HasVideoTrack: Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+
+  for i := 0 to Length(FTrackList)-1 do
+    if FTrackList[i].Kind = ttVideo then
+      Exit(True);
 end;
 
 // -----------------------------------------------------------------------------
