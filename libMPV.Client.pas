@@ -2197,10 +2197,9 @@ end;
 
 function Load_libMPV(const AFileName: String = ''): Integer;
 begin
+  if IsLibMPV_Loaded then Exit(MPV_ERROR_SUCCESS);
+
   Result := MPV_ERROR_GENERIC;
-  {$IFDEF UNIX}
-  setlocale(1, 'C');
-  {$ENDIF}
 
   if AFileName.IsEmpty then
     hLibMPV := TryLoadLibMPV
@@ -2344,6 +2343,9 @@ end;
 // -----------------------------------------------------------------------------
 
 initialization
+  {$IFDEF UNIX}
+  setlocale(1, 'C');
+  {$ENDIF}
   hLibMPV := dynlibs.NilHandle;
 
 // -----------------------------------------------------------------------------
