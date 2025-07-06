@@ -20,10 +20,6 @@
         <HasRegisterProc Value="True"/>
         <UnitName Value="MPVPlayer"/>
       </Item>
-      <Item>
-        <Filename Value="MPVPlayer.Thread.pas"/>
-        <UnitName Value="MPVPlayer.Thread"/>
-      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

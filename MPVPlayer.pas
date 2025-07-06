@@ -33,7 +33,7 @@ interface
 
 uses
   Classes, Controls, SysUtils, LazFileUtils, ExtCtrls, Graphics, LCLType,
-  LResources, LazarusPackageIntf, libMPV.Client, MPVPlayer.Thread,
+  LResources, LazarusPackageIntf, libMPV.Client,
   MPVPlayer.RenderGL, OpenGLContext, MPVPlayer.Filters
   {$IFDEF LINUX}, gtk2, gdk2x{$ENDIF}
   {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF}
@@ -51,6 +51,7 @@ type
   TMPVPlayerVideoAspectRatio  = (arDefault, ar4_3, ar16_9, ar185_1, ar235_1);
   TMPVPlayerLogLevel          = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerScreenshotMode    = (smSubtitles, smVideo, smWindow);
+  TMPVPlayerEventReceived     = procedure(ASender: TObject; AEvent: Pmpv_event) of object;
   TMPVPlayerNotifyEvent       = procedure(ASender: TObject; AParam: Integer) of object;
   TMPVPlayerEndFileEvent      = procedure(ASender: TObject; AReason, AError: Integer) of object;
   TMPVPlayerLogEvent          = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
@@ -71,6 +72,22 @@ type
 
   TMPVPlayerTrackList = array of TMPVPlayerTrackInfo;
 
+  TMPVPlayer = class;
+
+  { TMPVEventThread }
+
+  TMPVEventThread = class(TThread)
+  private
+    FHandle : Pmpv_handle;
+    FEvent  : Pmpv_event;
+    FOwner  : TMPVPlayer;
+    procedure HandleEvent;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AHandle: Pmpv_handle; AOwner: TMPVPlayer);
+  end;
+
   { TMPVPlayer }
 
   TMPVPlayer = class(TCustomPanel)
@@ -82,7 +99,7 @@ type
     FInitialized    : Boolean;
     FStartOptions   : TStringList;
     FLogLevel       : TMPVPlayerLogLevel;
-    FMPVEvent       : TMPVPlayerThreadEvent;
+    FMPVEvent       : TMPVEventThread;
     FTrackList      : TMPVPlayerTrackList;
     FAspectRatio    : TMPVPlayerVideoAspectRatio;
     FAutoStart      : Boolean;
@@ -120,6 +137,7 @@ type
     FBackImage : TPicture;
     {$ENDIF}
 
+    FOnEventReceived : TMPVPlayerEventReceived;        // MPV thread events
     FOnStartFile: TNotifyEvent;                        // Notification before playback start of a file (before the file is loaded).
     FOnEndFile: TMPVPlayerEndFileEvent;                // Notification after playback end (after the file was unloaded).
     FOnFileLoaded: TNotifyEvent;                       // Notification when the file has been loaded (headers were read etc.)
@@ -147,8 +165,7 @@ type
     function InitializeRenderGL: Boolean;
     procedure UnInitializeRenderGL;
 
-    procedure PushEvent;
-    procedure ReceivedEvent(Sender: TObject);
+    procedure ReceivedEvent(Sender: TObject; Event: Pmpv_event);
 
     {$IFDEF SDL2}
     function InitializeRenderSDL: Boolean;
@@ -376,17 +393,6 @@ uses
 
 // -----------------------------------------------------------------------------
 
-{ libmpv wakeup_events }
-
-// -----------------------------------------------------------------------------
-
-procedure LIBMPV_EVENT(Sender: Pointer); cdecl;
-begin
-  if (Sender <> NIL) then TMPVPlayer(Sender).PushEvent;
-end;
-
-// -----------------------------------------------------------------------------
-
 { Helpers}
 
 // -----------------------------------------------------------------------------
@@ -416,6 +422,44 @@ begin
   else
     Result := 0;
 end;
+
+// -----------------------------------------------------------------------------
+
+{ TMPVEventThread }
+
+// -----------------------------------------------------------------------------
+
+constructor TMPVEventThread.Create(AHandle: Pmpv_handle; AOwner: TMPVPlayer);
+begin
+  inherited Create(True);
+  FreeOnTerminate := False;
+  FHandle := AHandle;
+  FOwner := AOwner;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVEventThread.HandleEvent;
+begin
+  if Assigned(FOwner) and Assigned(FOwner.FOnEventReceived) and not Terminated then
+    FOwner.FOnEventReceived(FOwner, FEvent);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVEventThread.Execute;
+begin
+  while not Terminated do
+  begin
+    FEvent := mpv_wait_event(FHandle^, 0);
+    if FEvent^.event_id = MPV_EVENT_NONE then Continue;
+    Synchronize(@HandleEvent);
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+{ TMPVPlayer }
 
 // -----------------------------------------------------------------------------
 
@@ -726,6 +770,7 @@ begin
     Add('ytdl=yes');                // use YouTube downloader.
   end;
 
+  FOnEventReceived := @ReceivedEvent;
   FError := Load_libMPV(FMPVFileName);
 end;
 
@@ -848,10 +893,6 @@ begin
   FTextNode.format             := MPV_FORMAT_NODE_MAP;
   FTextNode.u.list             := @FTextNodeList;
 
-  FMPVEvent := TMPVPlayerThreadEvent.Create;
-  FMPVEvent.OnEvent := @ReceivedEvent;
-  mpv_set_wakeup_callback(FMPV_HANDLE^, @LIBMPV_EVENT, Self);
-
   if FRenderMode = rmOpenGL then
   begin
     if not InitializeRenderGL then
@@ -885,6 +926,9 @@ begin
   end;
   {$ENDIF};
 
+  FMPVEvent := TMPVEventThread.Create(FMPV_HANDLE, Self);
+  FMPVEvent.Start;
+
   FPausePosMs := -1;
   FInitialized := True;
   Result := True;
@@ -914,9 +958,9 @@ begin
 
   if Assigned(FMPVEvent) then
   begin
-    FMPVEvent.OnEvent := NIL;
-    FMPVEvent.Free;
-    FMPVEvent := NIL;
+    FMPVEvent.Terminate;
+    FMPVEvent.WaitFor;
+    FreeAndNil(FMPVEvent);
   end;
 
   if FRenderMode = rmOpenGL then
@@ -1638,126 +1682,112 @@ end;
 
 // -----------------------------------------------------------------------------
 
-procedure TMPVPlayer.PushEvent;
+procedure TMPVPlayer.ReceivedEvent(Sender: TObject; Event: Pmpv_event);
 begin
-  if Assigned(FMPVEvent) then FMPVEvent.PushEvent;
-end;
+  if Event = NIL then Exit;
 
-// -----------------------------------------------------------------------------
+  case (Event^.event_id) of
+    MPV_EVENT_SHUTDOWN:
+    begin
+      //UnInitialize;
+    end;
 
-procedure TMPVPlayer.ReceivedEvent(Sender: TObject);
-var
-  Event: Pmpv_event;
-begin
-  while True do
-  begin
-    Event := mpv_wait_event(FMPV_HANDLE^, 0);
-    if (Event = NIL) or (Event^.event_id = MPV_EVENT_NONE) then Exit;
+    MPV_EVENT_LOG_MESSAGE:
+      if Assigned(OnLogMessage) then OnLogMessage(Sender,
+        Pmpv_event_log_message(Event^.Data)^.prefix,
+        Pmpv_event_log_message(Event^.Data)^.level,
+        Pmpv_event_log_message(Event^.Data)^.Text);
 
-    case (Event^.event_id) of
-      MPV_EVENT_SHUTDOWN:
+    MPV_EVENT_START_FILE:
+    begin
+      if Assigned(OnStartFile) then
+        OnStartFile(Sender);
+    end;
+
+    MPV_EVENT_FILE_LOADED:
+    begin
+      {$IFDEF USETIMER}
+      FTimer.Enabled := True;
+      FLastPos       := -1;
+      {$ENDIF}
+
+      if (FStartAtPosMs > 0) then
       begin
-        UnInitialize;
-        Break;
+        SetMediaPosInMs(FStartAtPosMs);
+        FStartAtPosMs := 0;
       end;
 
-      MPV_EVENT_LOG_MESSAGE:
-        if Assigned(OnLogMessage) then OnLogMessage(Sender,
-          Pmpv_event_log_message(Event^.Data)^.prefix,
-          Pmpv_event_log_message(Event^.Data)^.level,
-          Pmpv_event_log_message(Event^.Data)^.Text);
+      if Assigned(OnFileLoaded) then OnFileLoaded(Sender);
+    end;
 
-      MPV_EVENT_START_FILE:
+    MPV_EVENT_SEEK:
+    begin
+      if Assigned(OnSeek) then
+        OnSeek(Sender, GetMediaPosInMs);
+    end;
+
+    MPV_EVENT_END_FILE:
+    begin
+      if Assigned(OnEndFile) then
+        with Pmpv_event_end_file(Event^.data)^ do
+          OnEndFile(Sender, reason, error);
+    end;
+
+    MPV_EVENT_VIDEO_RECONFIG:
+    begin
+      GetTracks;
+      if Assigned(OnVideoReconfig) then
+        OnVideoReconfig(Sender);
+    end;
+
+    MPV_EVENT_AUDIO_RECONFIG:
+    begin
+      GetTracks;
+      if Assigned(OnAudioReconfig) then
+        OnAudioReconfig(Sender);
+    end;
+
+    MPV_EVENT_GET_PROPERTY_REPLY:
+    begin
+      if Assigned(OnGetReplyEvent) then
+        OnGetReplyEvent(Sender, Event^.reply_userdata, Event^.error, Pmpv_event_property(Event^.Data));
+    end;
+
+    MPV_EVENT_SET_PROPERTY_REPLY:
+    begin
+      if Assigned(OnSetReplyEvent) then
+        OnSetReplyEvent(Sender, Event^.reply_userdata, Event^.error);
+    end;
+
+    MPV_EVENT_COMMAND_REPLY:
+    begin
+      if Assigned(OnCommandReplyEvent) then
+        OnCommandReplyEvent(Sender, Event^.reply_userdata, Event^.error, Pmpv_event_command(Event^.Data));
+    end;
+
+    MPV_EVENT_PROPERTY_CHANGE:
+    begin
+      if (Pmpv_event_property(Event^.Data)^.Name = 'eof-reached') then
       begin
-        if Assigned(OnStartFile) then
-          OnStartFile(Sender);
-      end;
-
-      MPV_EVENT_FILE_LOADED:
-      begin
-        {$IFDEF USETIMER}
-        FTimer.Enabled := True;
-        FLastPos       := -1;
-        {$ENDIF}
-
-        if (FStartAtPosMs > 0) then
+        if (Pmpv_event_property(Event^.Data)^.data <> NIL) and (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
         begin
-          SetMediaPosInMs(FStartAtPosMs);
-          FStartAtPosMs := 0;
+          mpv_set_pause(True);
+          if Assigned(OnEndFile) then OnEndFile(Sender, MPV_END_FILE_REASON_EOF, 0);
         end;
-
-        if Assigned(OnFileLoaded) then OnFileLoaded(Sender);
-      end;
-
-      MPV_EVENT_SEEK:
+      end
+      else if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
       begin
-        if Assigned(OnSeek) then
-          OnSeek(Sender, GetMediaPosInMs);
+        if Assigned(OnBuffering) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
+          OnBuffering(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
       end;
 
-      MPV_EVENT_END_FILE:
+      {$IFNDEF USETIMER}
+      if (Pmpv_event_property(Event^.Data)^.Name = 'playback-time') and (Pmpv_event_property(Event^.Data)^.format = MPV_FORMAT_INT64) then
       begin
-        if Assigned(OnEndFile) then
-          with Pmpv_event_end_file(Event^.data)^ do
-            OnEndFile(Sender, reason, error);
+        if Assigned(OnTimeChanged) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
+          OnTimeChanged(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
       end;
-
-      MPV_EVENT_VIDEO_RECONFIG:
-      begin
-        GetTracks;
-        if Assigned(OnVideoReconfig) then
-          OnVideoReconfig(Sender);
-      end;
-
-      MPV_EVENT_AUDIO_RECONFIG:
-      begin
-        GetTracks;
-        if Assigned(OnAudioReconfig) then
-          OnAudioReconfig(Sender);
-      end;
-
-      MPV_EVENT_GET_PROPERTY_REPLY:
-      begin
-        if Assigned(OnGetReplyEvent) then
-          OnGetReplyEvent(Sender, Event^.reply_userdata, Event^.error, Pmpv_event_property(Event^.Data));
-      end;
-
-      MPV_EVENT_SET_PROPERTY_REPLY:
-      begin
-        if Assigned(OnSetReplyEvent) then
-          OnSetReplyEvent(Sender, Event^.reply_userdata, Event^.error);
-      end;
-
-      MPV_EVENT_COMMAND_REPLY:
-      begin
-        if Assigned(OnCommandReplyEvent) then
-          OnCommandReplyEvent(Sender, Event^.reply_userdata, Event^.error, Pmpv_event_command(Event^.Data));
-      end;
-
-      MPV_EVENT_PROPERTY_CHANGE:
-      begin
-        if (Pmpv_event_property(Event^.Data)^.Name = 'eof-reached') then
-        begin
-          if (Pmpv_event_property(Event^.Data)^.data <> NIL) and (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
-          begin
-            mpv_set_pause(True);
-            if Assigned(OnEndFile) then OnEndFile(Sender, MPV_END_FILE_REASON_EOF, 0);
-          end;
-        end
-        else if (Pmpv_event_property(Event^.Data)^.Name = 'cache-buffering-state') then //if (Pmpv_event_property(Event^.Data)^.Name = 'paused-for-cache') then
-        begin
-          if Assigned(OnBuffering) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
-            OnBuffering(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
-        end;
-
-        {$IFNDEF USETIMER}
-        if (Pmpv_event_property(Event^.Data)^.Name = 'playback-time') and (Pmpv_event_property(Event^.Data)^.format = MPV_FORMAT_INT64) then
-        begin
-          if Assigned(OnTimeChanged) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
-            OnTimeChanged(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
-        end;
-        {$ENDIF}
-      end;
+      {$ENDIF}
     end;
   end;
 end;

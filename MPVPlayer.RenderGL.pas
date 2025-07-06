@@ -144,7 +144,7 @@ constructor TMPVPlayerRenderThread.Create(AControl: TUWOpenGLControl; AHandle: P
 begin
   inherited Create(True);
 
-  FreeOnTerminate := True;
+  FreeOnTerminate := False;
   Event           := RTLEventCreate;
   Owner           := AOwner;
   mpvHandle       := AHandle;
@@ -167,6 +167,7 @@ begin
   UnInitializeRenderContext;
   RTLEventDestroy(Event);
   Owner := NIL;
+  mpvHandle := NIL;
 
   inherited Destroy;
 end;
@@ -339,10 +340,8 @@ begin
   if Assigned(FThread) then
   begin
     FThread.Terminate;
-    {$IFDEF WINDOWS}
     FThread.WaitFor;
-    {$ENDIF}
-    FThread := NIL;
+    FreeAndNil(FThread);
   end;
 end;
 
