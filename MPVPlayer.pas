@@ -133,6 +133,7 @@ type
     FTextNodeList   : mpv_node_list;
     FTextNodeKeys   : array of PChar;
     FTextNodeValues : array of mpv_node;
+    FStringBuilder  : TStringBuilder;
 
     {$IFDEF ENABLE_BACKIMAGE}
     FBackImage : TPicture;
@@ -855,6 +856,8 @@ begin
     ThousandSeparator := DecimalSeparator;
   end;
 
+  FStringBuilder := TStringBuilder.Create;
+
   with FStartOptions do
   begin
     Sorted     := True;
@@ -888,6 +891,8 @@ begin
   {$IFDEF USETIMER}
   FTimer.Free;
   {$ENDIF}
+
+  FStringBuilder.Free;
 
   FStartOptions.Free;
   FStartOptions := NIL;
@@ -1652,28 +1657,75 @@ end;
 
 procedure TMPVPlayer.ShowOverlayText(const AText: String; const ATags: String = '{\an2}');
 var
-  FormattedText: String;
+  i, StartPos, TextLen: Integer;
+  TagPos: Integer;
+  GlobalStyle: String;
+  CurrentLineStart: Integer;
 begin
-  if not FInitialized then
-    Exit
-  else if (AText <> FText) then
+  if not FInitialized then Exit;
+
+  if AText.IsEmpty then
   begin
-    FText := AText;
-    if AText.IsEmpty then
+    FText := '';
+    FTextNodeValues[2].u._string := 'none';
+    FTextNodeValues[3].u._string := '';
+    mpv_command_node_(FTextNode);
+    Exit;
+  end;
+
+  FStringBuilder.Clear;
+  FStringBuilder.EnsureCapacity(Length(AText) + 32);
+  FStringBuilder.Append(ATags);
+
+  TextLen := Length(AText);
+  StartPos := 1;
+
+  // detectar estilos iniciales
+  while (StartPos <= TextLen) and (AText[StartPos] = '{') and
+        (StartPos < TextLen) and (AText[StartPos+1] = '\') do
+  begin
+    TagPos := Pos('}', AText, StartPos);
+    if TagPos = 0 then Break;
+    StartPos := TagPos + 1;
+  end;
+
+  GlobalStyle := Copy(AText, 1, StartPos - 1);
+  FStringBuilder.Append(GlobalStyle);
+
+  CurrentLineStart := StartPos;
+  i := StartPos;
+
+  while i <= TextLen do
+  begin
+    if (AText[i] = #10) or (AText[i] = #13) then
     begin
-      FTextNodeValues[2].u._string := 'none';
-      FTextNodeValues[3].u._string := '';
+      if i > CurrentLineStart then
+        FStringBuilder.Append(AText, CurrentLineStart - 1, i - CurrentLineStart);
+
+      FStringBuilder.Append('\N');
+
+      if (AText[i] = #13) and (i < TextLen) and (AText[i+1] = #10) then
+        i := i + 2
+      else
+        i := i + 1;
+
+      CurrentLineStart := i;
     end
     else
-    begin
-      FTextNodeValues[2].u._string := 'ass-events';
-      //FormattedText := '{\fscx75\fscy75\shad0}' + AText;
-      FormattedText := ATags + InvertLines(AText); // sin esto mpv invierte el orden de las lineas
-      FTextNodeValues[3].u._string := PChar(FormattedText);
-    end;
-
-    mpv_command_node_(FTextNode);
+      Inc(i);
   end;
+
+  if CurrentLineStart <= TextLen then
+    FStringBuilder.Append(AText, CurrentLineStart - 1, TextLen - CurrentLineStart + 1);
+
+  FText := FStringBuilder.ToString;
+  if FText.EndsWith('\N') then
+     Delete(FText, Length(FText)-1, 2);
+
+  FTextNodeValues[2].u._string := 'ass-events';
+  FTextNodeValues[3].u._string := PChar(FText);
+
+  mpv_command_node_(FTextNode);
 end;
 
 // -----------------------------------------------------------------------------
