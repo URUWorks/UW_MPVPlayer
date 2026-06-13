@@ -92,32 +92,35 @@ type
 
   TMPVPlayer = class(TCustomPanel)
   private
-    FMPV_HANDLE     : Pmpv_handle;
-    FError          : mpv_error;
-    FVersion        : DWord;
-    FGL             : TUWOpenGLControl;
-    FInitialized    : Boolean;
-    FStartOptions   : TStringList;
-    FLogLevel       : TMPVPlayerLogLevel;
-    FMPVEvent       : TMPVEventThread;
-    FTrackList      : TMPVPlayerTrackList;
-    FAspectRatio    : TMPVPlayerVideoAspectRatio;
-    FAutoStart      : Boolean;
-    FAutoLoadSub    : Boolean;
-    FKeepAspect     : Boolean;
-    FNoAudioDisplay : Boolean;
-    FUseHWDec       : Boolean;
-    FSMPTEMode      : Boolean;
-    FRenderFail     : TMPVPlayerRendeFailAction;
-    FStartAtPosMs   : Integer;
-    FPausePosMs     : Integer;
-    FFileName       : String;
-    FMPVFileName    : String;
-    FYTDLPFileName  : String;
-    FFormatSettings : TFormatSettings;
+    FMPV_HANDLE        : Pmpv_handle;
+    FError             : mpv_error;
+    FVersion           : DWord;
+    FGL                : TUWOpenGLControl;
+    FInitialized       : Boolean;
+    FStartOptions      : TStringList;
+    FLogLevel          : TMPVPlayerLogLevel;
+    FMPVEvent          : TMPVEventThread;
+    FTrackList         : TMPVPlayerTrackList;
+    FAspectRatio       : TMPVPlayerVideoAspectRatio;
+    FFontSize          : Integer;
+    FSafeMarginPercent : Byte;
+    FSafeZoneEnabled   : Boolean;
+    FAutoStart         : Boolean;
+    FAutoLoadSub       : Boolean;
+    FKeepAspect        : Boolean;
+    FNoAudioDisplay    : Boolean;
+    FUseHWDec          : Boolean;
+    FSMPTEMode         : Boolean;
+    FRenderFail        : TMPVPlayerRendeFailAction;
+    FStartAtPosMs      : Integer;
+    FPausePosMs        : Integer;
+    FFileName          : String;
+    FMPVFileName       : String;
+    FYTDLPFileName     : String;
+    FFormatSettings    : TFormatSettings;
     {$IFDEF USETIMER}
-    FTimer          : TTimer;
-    FLastPos        : Integer;
+    FTimer             : TTimer;
+    FLastPos           : Integer;
     {$ENDIF}
 
     FRenderMode : TMPVPlayerRenderMode;
@@ -145,6 +148,7 @@ type
     FOnFileLoaded: TNotifyEvent;                       // Notification when the file has been loaded (headers were read etc.)
     FOnVideoReconfig: TNotifyEvent;                    // Happens after video changed in some way.
     FOnAudioReconfig: TNotifyEvent;                    // Similar to VIDEO_RECONFIG.
+    FOnTracksChanged: TNotifyEvent;                    // Tracks has changed
     FOnSeek: TMPVPlayerNotifyEvent;                    // Happens when a seek was initiated.
     FOnPlaybackRestart: TNotifyEvent;                  // Usually happens on start of playback and after seeking.
     FOnPlay: TNotifyEvent;                             // Play by user
@@ -179,6 +183,9 @@ type
     procedure SetHWDec(const AValue: Boolean);
     function LogLevelToString: String;
     procedure SetLogLevel(const AValue: TMPVPlayerLogLevel);
+    procedure SetFontSize(const AValue: Integer);
+    procedure SetSafeMarginPercent(const AValue: Byte);
+    procedure SetSafeZoneEnabled(const AValue: Boolean);
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
@@ -186,6 +193,8 @@ type
 
     procedure DoOnPaint(Sender: TObject);
     procedure DoOnGLResize(Sender: TObject);
+  protected
+    procedure Resize; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -273,6 +282,8 @@ type
     procedure SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters);
     procedure ClearAudioFilters;
 
+    procedure EnforceSubtitleSafeZone(const AEnable: Boolean);
+
     property mpv_handle: Pmpv_handle read FMPV_HANDLE;
     property Error: mpv_error read FError;
     property ErrorString: String read GetErrorString;
@@ -285,6 +296,9 @@ type
     property MPVFileName: String read FMPVFileName write FMPVFileName;
     property YTDLPFileName: String read FYTDLPFileName write FYTDLPFileName;
     property SMPTEMode: Boolean read FSMPTEMode write FSMPTEMode;
+    property FontSize: Integer read FFontSize write SetFontSize default 55;
+    property SafeMarginPercent: Byte read FSafeMarginPercent write SetSafeMarginPercent default 10;
+    property SafeZoneEnabled: Boolean read FSafeZoneEnabled write SetSafeZoneEnabled default False;
     {$IFDEF USETIMER}
     property Timer: TTimer read FTimer;
     {$ENDIF}
@@ -303,7 +317,7 @@ type
     property ChildSizing;
     property ClientHeight;
     property ClientWidth;
-    property Color default clBlack;
+    property Color default $101010;
     property Constraints;
     property DockSite;
     property DragCursor;
@@ -368,6 +382,7 @@ type
     property OnFileLoaded: TNotifyEvent read FOnFileLoaded write FOnFileLoaded;
     property OnVideoReconfig: TNotifyEvent read FOnVideoReconfig write FOnVideoReconfig;
     property OnAudioReconfig: TNotifyEvent read FOnAudioReconfig write FOnAudioReconfig;
+    property OnTracksChanged: TNotifyEvent read FOnTracksChanged write FOnTracksChanged;
     property OnSeek: TMPVPlayerNotifyEvent read FOnSeek write FOnSeek;
     property OnPlaybackRestart: TNotifyEvent read FOnPlaybackRestart write FOnPlaybackRestart;
 
@@ -393,7 +408,7 @@ procedure Register;
 implementation
 
 uses
-  Clipbrd;
+  Clipbrd, Math;
 
 // -----------------------------------------------------------------------------
 
@@ -425,66 +440,6 @@ begin
     Result := Round((Frames / FPS) * 1000.0)
   else
     Result := 0;
-end;
-
-// -----------------------------------------------------------------------------
-
-function InvertLines(const Text: String): String;
-var
-  ReadPos, LineEnd, LineStart: Integer;
-  WritePos, ChunkLen: Integer;
-begin
-  if Text.IsEmpty then Exit('');
-
-  // 1. Asignación única de memoria
-  SetLength(Result, Length(Text));
-  WritePos := 1;
-
-  ReadPos := Length(Text);
-  LineEnd := ReadPos;
-
-  while ReadPos > 0 do
-  begin
-    // 2. Escanear hacia atrás buscando el inicio de la línea (o fin del anterior)
-    while (ReadPos > 0) and (Text[ReadPos] <> #10) and (Text[ReadPos] <> #13) do
-      Dec(ReadPos);
-
-    // 3. Calcular dónde empieza el texto de esta línea
-    LineStart := ReadPos + 1;
-    ChunkLen := LineEnd - LineStart + 1;
-
-    // 4. Mover el TEXTO de la línea al resultado
-    if ChunkLen > 0 then
-    begin
-      Move(Text[LineStart], Result[WritePos], ChunkLen * SizeOf(Char));
-      Inc(WritePos, ChunkLen);
-    end;
-
-    // 5. Mover el SALTO DE LÍNEA que encontramos (si lo hubo)
-    if ReadPos > 0 then
-    begin
-      // Detectar si es Windows (CRLF #13#10)
-      if (Text[ReadPos] = #10) and (ReadPos > 1) and (Text[ReadPos - 1] = #13) then
-      begin
-        Result[WritePos] := #13; Inc(WritePos);
-        Result[WritePos] := #10; Inc(WritePos);
-        Dec(ReadPos, 2); // Saltamos los dos caracteres
-      end
-      else
-      begin
-        // Salto simple (Mac o Linux)
-        Result[WritePos] := Text[ReadPos];
-        Inc(WritePos);
-        Dec(ReadPos); // Saltamos un carácter
-      end;
-    end;
-
-    // El fin de la próxima línea será donde terminamos de leer ahora
-    LineEnd := ReadPos;
-  end;
-
-  // 6. Ajuste final (por seguridad)
-  SetLength(Result, WritePos - 1);
 end;
 
 // -----------------------------------------------------------------------------
@@ -624,11 +579,11 @@ begin
   FError := MPV_ERROR_OPTION_ERROR;
   if not Assigned(mpv_set_option_string) or (FMPV_HANDLE = NIL) or AValue.IsEmpty then Exit(FError);
 
-  i := Pos('=', AValue);
-  if i > 0 then
+  i := AValue.IndexOf('=');
+  if i > -1 then
   begin
-    s1 := Copy(AValue, 1, i-1);
-    s2 := Copy(AValue, i+1, AValue.Length-i);
+    s1 := AValue.Substring(0, i);
+    s2 := AValue.Substring(i + 1);
   end
   else
   begin
@@ -668,13 +623,17 @@ end;
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.mpv_set_property_string_(const APropertyName: String; const AValue: String; const reply_userdata: Integer = 0);
+var
+  p: PChar;
 begin
   if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
 
+  p := PChar(AValue);
+
   if reply_userdata > 0 then
-    FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING, PChar(AValue))
+    FError := mpv_set_property_async(FMPV_HANDLE^, reply_userdata, PChar(APropertyName), MPV_FORMAT_STRING, @p)
   else
-    FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_STRING, PChar(AValue));
+    FError := mpv_set_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_STRING, @p);
 end;
 
 // -----------------------------------------------------------------------------
@@ -802,30 +761,33 @@ begin
   BevelOuter       := bvNone;
   ParentBackground := False;
   ParentColor      := False;
-  Color            := clBlack;
+  Color            := $101010;
   FullRepaint      := False;
   Caption          := '';
 
   // our control setup
-  FGL             := NIL;
-  FMPV_HANDLE     := NIL;
-  FVersion        := 0;
-  FError          := 0;
-  FInitialized    := False;
-  FMPVEvent       := NIL;
-  FLogLevel       := llStatus;
-  FAutoStart      := True;
-  FAutoLoadSub    := False;
-  FKeepAspect     := True;
-  FNoAudioDisplay := False;
-  FUseHWDec       := False;
-  FSMPTEMode      := False;
-  FRenderFail     := rfNone;
-  FPausePosMs     := -1;
-  FFileName       := '';
-  FMPVFileName    := '';
-  FYTDLPFileName  := '';
-  FStartOptions   := TStringList.Create;
+  FGL                := NIL;
+  FMPV_HANDLE        := NIL;
+  FVersion           := 0;
+  FError             := 0;
+  FInitialized       := False;
+  FMPVEvent          := NIL;
+  FLogLevel          := llStatus;
+  FFontSize          := 55;
+  FSafeMarginPercent := 10;
+  FSafeZoneEnabled   := False;
+  FAutoStart         := True;
+  FAutoLoadSub       := False;
+  FKeepAspect        := True;
+  FNoAudioDisplay    := False;
+  FUseHWDec          := False;
+  FSMPTEMode         := False;
+  FRenderFail        := rfNone;
+  FPausePosMs        := -1;
+  FFileName          := '';
+  FMPVFileName       := '';
+  FYTDLPFileName     := '';
+  FStartOptions      := TStringList.Create;
   SetLength(FTrackList, 0);
 
   FAspectRatio := arDefault;
@@ -864,18 +826,28 @@ begin
     Duplicates := dupIgnore;
 
     Add('hwdec=no');
-    //Add('hwdec=auto-safe  ');       // enable best hw decoder. white-list ie: hwdec-codecs=h264,vc1,hevc,vp8,av1,prores
-    Add('vd-lavc-dr=no');           // enable direct rendering (default: auto).
-    Add('osc=no');                  // default: yes.
-    Add('keep-open=always');        // don't auto close video.
-    Add('hr-seek=yes');             // use precise seeks whenever possible.
-    Add('hr-seek-framedrop=no');    // default: yes.
-    //Add('osd-scale-by-window=no');  // scale the OSD with the window size. default: yes.
-    Add('ytdl=yes');                // use YouTube downloader.
+    //Add('hwdec=auto-safe  ');    // enable best hw decoder. white-list ie: hwdec-codecs=h264,vc1,hevc,vp8,av1,prores
+    Add('vd-lavc-dr=no');        // enable direct rendering (default: auto).
+    Add('osc=no');               // default: yes.
+    Add('keep-open=always');     // don't auto close video.
+    Add('hr-seek=yes');          // use precise seeks whenever possible.
+    Add('hr-seek-framedrop=no'); // default: yes.
+
+    Add('osd-scale-by-window=yes');   // scale the OSD with the window size. default: yes.
+    Add('osd-align-y=bottom');
+    Add('osd-align-x=center');
+    Add('sub-scale-with-window=yes'); // scale the SUB with the window size. default: yes.
+    Add('sub-use-margins=no');
+    Add('sub-ass-override=force');
+    Add('sub-align-y=bottom');
+
+    Add('ytdl=yes'); // use YouTube downloader.
   end;
 
   FOnEventReceived := @ReceivedEvent;
   FError := Load_libMPV(FMPVFileName);
+  if (FError = MPV_ERROR_SUCCESS) and Assigned(mpv_client_api_version) then
+    FVersion := mpv_client_api_version();
 end;
 
 // -----------------------------------------------------------------------------
@@ -904,6 +876,66 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVPlayer.Resize;
+var
+  VideoW, VideoH: Integer;
+  EffectiveW, EffectiveH: Double;
+  BlackBarX, BlackBarY: Double;
+  TargetMarginXPx, TargetMarginYPx: Double;
+  MarginMultiplier: Double;
+  NewFontSize, NewMarginX, NewMarginY: Int64;
+begin
+  inherited Resize;
+
+  if FInitialized then
+  begin
+    VideoW := GetVideoWidth;
+    VideoH := GetVideoHeight;
+
+    if (VideoW > 0) and (VideoH > 0) and (ClientHeight > 0) then
+    begin
+      // Calcular el tamaño efectivo del video (sin las bandas negras)
+      if (ClientWidth / ClientHeight) < (VideoW / VideoH) then
+      begin
+        // Letterbox (bandas horizontales)
+        EffectiveW := ClientWidth;
+        EffectiveH := ClientWidth * (VideoH / VideoW);
+        BlackBarX := 0;
+        BlackBarY := (ClientHeight - EffectiveH) / 2.0;
+      end
+      else
+      begin
+        // Pillarbox (bandas verticales)
+        EffectiveW := ClientHeight * (VideoW / VideoH);
+        EffectiveH := ClientHeight;
+        BlackBarX := (ClientWidth - EffectiveW) / 2.0;
+        BlackBarY := 0;
+      end;
+
+      // Píxeles reales deseados: Banda negra + "10%" del video
+      MarginMultiplier := FSafeMarginPercent / 100.0;
+      TargetMarginXPx := BlackBarX + (EffectiveW * MarginMultiplier);
+      TargetMarginYPx := BlackBarY + (EffectiveH * MarginMultiplier);
+
+      // Convertimos nuestros píxeles reales a la escala virtual de 720 que usa mpv
+      NewMarginX := Round(TargetMarginXPx * (720.0 / ClientHeight));
+      NewMarginY := Round(TargetMarginYPx * (720.0 / ClientHeight));
+      NewFontSize := Round(FFontSize * (EffectiveH / ClientHeight));
+
+      // Aplicar
+      mpv_set_property_int64('osd-font-size', NewFontSize);
+      mpv_set_property_int64('osd-margin-x', NewMarginX);
+      mpv_set_property_int64('osd-margin-y', NewMarginY);
+
+      mpv_set_property_int64('sub-font-size', NewFontSize);
+      mpv_set_property_int64('sub-margin-x', NewMarginX);
+      mpv_set_property_int64('sub-margin-y', NewMarginY);
+    end;
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
 function TMPVPlayer.Initialize: Boolean;
 var
   sl : TStringList;
@@ -923,7 +955,7 @@ begin
   end;
 
   // Get version lib
-  if Assigned(mpv_client_api_version) then
+  if Assigned(mpv_client_api_version) and (FVersion = 0) then
     FVersion := mpv_client_api_version();
 
   sl := TStringList.Create;
@@ -1053,14 +1085,26 @@ begin
   FLastPos       := -1;
   {$ENDIF}
 
-  // 1. Callbacks y propiedades observadas
+  // Liberar hilo de eventos PRIMERO
+  if Assigned(FMPVEvent) then
+  begin
+    FMPVEvent.Terminate;
+    // Forzamos al hilo a despertar si está esperando un evento (evita bloqueos al cerrar)
+    if Assigned(mpv_wakeup) and Assigned(FMPV_HANDLE) then
+      mpv_wakeup(FMPV_HANDLE^);
+
+    FMPVEvent.WaitFor;
+    FreeAndNil(FMPVEvent);
+  end;
+
+  // Callbacks y propiedades observadas
   if Assigned(mpv_unobserve_property) and Assigned(FMPV_HANDLE) then
     mpv_unobserve_property(FMPV_HANDLE^, 0);
 
   if Assigned(mpv_set_wakeup_callback) and Assigned(FMPV_HANDLE) then
     mpv_set_wakeup_callback(FMPV_HANDLE^, NIL, NIL);
 
-  // 2. Detener Renderizado
+  // Detener Renderizado
   if FRenderMode = rmOpenGL then
     UnInitializeRenderGL
   {$IFDEF SDL2}
@@ -1068,19 +1112,11 @@ begin
     UnInitializeRenderSDL
   {$ENDIF};
 
-  // 3. Destruir núcleo de MPV
+  // Destruir núcleo de MPV al final de forma segura
   if Assigned(mpv_terminate_destroy) and Assigned(FMPV_HANDLE) then
   begin
     mpv_terminate_destroy(FMPV_HANDLE^);
     FMPV_HANDLE := NIL;
-  end;
-
-  // 4. Liberar hilo de eventos
-  if Assigned(FMPVEvent) then
-  begin
-    FMPVEvent.Terminate;
-    FMPVEvent.WaitFor;
-    FreeAndNil(FMPVEvent);
   end;
 
   FShowText := '';
@@ -1228,6 +1264,51 @@ begin
 
   if FInitialized and (FMPV_HANDLE <> NIL) then
     mpv_request_log_messages(FMPV_HANDLE^, PChar(LogLevelToString));
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetFontSize(const AValue: Integer);
+begin
+  if FFontSize = AValue then Exit;
+
+  // Límite para que no pongan 0 o un tamaño absurdo
+  if AValue < 10
+    then FFontSize := 10
+  else if AValue > 200 then
+    FFontSize := 200
+  else
+    FFontSize := AValue;
+
+  // Forzamos el recálculo inmediato
+  if FInitialized then
+    Resize;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetSafeMarginPercent(const AValue: Byte);
+begin
+  if FSafeMarginPercent = AValue then Exit;
+
+  // Límite de seguridad para evitar locuras (max 50%)
+  if AValue > 50 then
+    FSafeMarginPercent := 50
+  else
+    FSafeMarginPercent := AValue;
+
+  if FInitialized and FSafeZoneEnabled then
+  begin
+    Resize;
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetSafeZoneEnabled(const AValue: Boolean);
+begin
+  if FSafeZoneEnabled = AValue then Exit;
+  EnforceSubtitleSafeZone(AValue);
 end;
 
 // -----------------------------------------------------------------------------
@@ -1676,6 +1757,7 @@ begin
   FStringBuilder.Clear;
   FStringBuilder.EnsureCapacity(Length(AText) + 32);
   FStringBuilder.Append(ATags);
+  FStringBuilder.Append('{\q2}'); // disable WordWrap
 
   TextLen := Length(AText);
   StartPos := 1;
@@ -1735,7 +1817,7 @@ begin
   if (AText <> FShowText) then
   begin
     FShowText := AText;
-    mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}' + ATags + AText, ADuration.ToString]);
+    mpv_command_(['expand-properties', 'show-text', '${osd-ass-cc/0}{\q2}' + ATags + AText.Replace(sLineBreak, '\N'), ADuration.ToString]);
   end;
 end;
 
@@ -1927,18 +2009,17 @@ begin
           OnEndFile(Sender, reason, error);
     end;
 
-    MPV_EVENT_VIDEO_RECONFIG:
+    MPV_EVENT_VIDEO_RECONFIG, MPV_EVENT_AUDIO_RECONFIG:
     begin
       GetTracks;
-      if Assigned(OnVideoReconfig) then
-        OnVideoReconfig(Sender);
-    end;
 
-    MPV_EVENT_AUDIO_RECONFIG:
-    begin
-      GetTracks;
-      if Assigned(OnAudioReconfig) then
+      if (Event^.event_id = MPV_EVENT_VIDEO_RECONFIG) and Assigned(OnVideoReconfig) then
+        OnVideoReconfig(Sender)
+      else if (Event^.event_id = MPV_EVENT_AUDIO_RECONFIG) and Assigned(OnAudioReconfig) then
         OnAudioReconfig(Sender);
+
+      if Assigned(FOnTracksChanged) then
+        FOnTracksChanged(Sender);
     end;
 
     MPV_EVENT_GET_PROPERTY_REPLY:
@@ -2171,12 +2252,49 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVPlayer.EnforceSubtitleSafeZone(const AEnable: Boolean);
+var
+  LavfiFilter: String;
+  TitleMargin, TitleBox: Double;
+begin
+  FSafeZoneEnabled := AEnable;
+  if not FInitialized then Exit;
+
+  if AEnable then
+  begin
+    // Convertimos el porcentaje del Title Safe (ej. 10) a formato matemático (ej. 0.10)
+    TitleMargin := FSafeMarginPercent / 100.0;
+    TitleBox := 1.0 - (TitleMargin * 2.0);
+
+    // Agregamor el filtro visual
+    mpv_command_(['vf', 'add', '@actionsafe:' + LavfiActionSafe]);
+    LavfiFilter := Format(LavfiTitleSafe, [TitleMargin, TitleMargin, TitleBox, TitleBox], FFormatSettings);
+    mpv_command_(['vf', 'add', '@titlesafe:' + LavfiFilter]);
+
+    // Forzamos el cálculo
+    Resize;
+  end
+  else
+  begin
+    // BORRAR LAS LÍNEAS VISUALES
+    mpv_command_(['vf', 'remove', '@actionsafe']);
+    mpv_command_(['vf', 'remove', '@titlesafe']);
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
 {$IFDEF ENABLE_BACKIMAGE}
 procedure TMPVPlayer.EraseBackground(DC: HDC);
+const
+  MAX_UI_SIZE = 300; // tamaño máximo visual permitido
+
 var
-  FCanvas : TCanvas;
-  R, aRect : TRect;
-  scaledHeight, scaledWidth : Integer;
+  FCanvas: TCanvas;
+  R, aRect: TRect;
+  scaledWidth, scaledHeight : Integer;
+  ScaleFactor: Double;
+  OldAntialias: TAntialiasingMode;
 begin
   if FInitialized then
   begin
@@ -2185,43 +2303,69 @@ begin
   end;
 
   FCanvas := (Self as TCustomControl).Canvas;
-  aRect := TRect.Create(0, 0, Self.width, Self.Height);
+  aRect := Rect(0, 0, Self.Width, Self.Height);
+
   if (FCanvas <> NIL) then
-    with FCanvas do
+  begin
+    if DC <> 0 then
+      FCanvas.Handle := DC;
+
+    // Fondo
+    FCanvas.Brush.Color := Color;
+    FCanvas.FillRect(aRect);
+
+    if not (csDesigning in ComponentState) then
     begin
-      if DC <> 0 then
-        Handle := DC;
-
-      Brush.Color := Color;
-
-      if not (csDesigning in ComponentState) then
+      if Assigned(FBackImage) and
+         (FBackImage.Width > 0) and
+         (FBackImage.Height > 0) then
       begin
-        if (FBackImage.Width / FBackImage.Height) > (aRect.Width / aRect.Height) then
-        begin
-          // image is "wide" --> fit image width into cell
-          scaledHeight := Round(FBackImage.Height / FBackImage.Width * aRect.Width);
-          R.Left := 0;
-          R.Right := aRect.Right;
-          R.Top := (aRect.Height - scaledHeight) div 2;
-          R.Bottom := (aRect.Height + scaledHeight) div 2;
-        end
-        else
-        begin
-          // image is "high" --> fit image height into cell
-          scaledWidth := Round(FBackImage.Width / FBackImage.Height * aRect.Height);
-          R.Top := 0;
-          R.Bottom := aRect.Height;
-          R.Left := (aRect.Width - scaledWidth) div 2;
-          R.Right := (aRect.Width + scaledWidth) div 2;
-        end;
-        Rectangle(0, 0, Self.Width, Self.Height);
-        StretchDraw(R, BackImage.Graphic);
-      end
-      else
-        DrawFocusRect(aRect);
+        // Escalado manteniendo aspect ratio
+        ScaleFactor := Min(
+          aRect.Width / FBackImage.Width,
+          aRect.Height / FBackImage.Height
+        );
 
-      if DC <> 0 then Handle := 0;
-    end;
+        // Nunca agrandar más que el tamaño original
+        if ScaleFactor > 1 then
+          ScaleFactor := 1;
+
+        scaledWidth  := Round(FBackImage.Width * ScaleFactor);
+        scaledHeight := Round(FBackImage.Height * ScaleFactor);
+
+        // Limitar tamaño máximo visual
+        if scaledWidth > MAX_UI_SIZE then
+        begin
+          ScaleFactor  := MAX_UI_SIZE / scaledWidth;
+          scaledWidth  := Round(scaledWidth * ScaleFactor);
+          scaledHeight := Round(scaledHeight * ScaleFactor);
+        end;
+
+        if scaledHeight > MAX_UI_SIZE then
+        begin
+          ScaleFactor  := MAX_UI_SIZE / scaledHeight;
+          scaledWidth  := Round(scaledWidth * ScaleFactor);
+          scaledHeight := Round(scaledHeight * ScaleFactor);
+        end;
+
+        // Centrar imagen
+        R.Left := (aRect.Width - scaledWidth) div 2;
+        R.Top := (aRect.Height - scaledHeight) div 2;
+        R.Right := R.Left + scaledWidth;
+        R.Bottom := R.Top + scaledHeight;
+
+        OldAntialias := FCanvas.AntialiasingMode;
+        FCanvas.AntialiasingMode := amOn;
+        FCanvas.StretchDraw(R, FBackImage.Graphic);
+        FCanvas.AntialiasingMode := OldAntialias;
+      end;
+    end
+    else
+      FCanvas.DrawFocusRect(aRect);
+
+    if DC <> 0 then
+      FCanvas.Handle := 0;
+  end;
 end;
 {$ENDIF}
 
