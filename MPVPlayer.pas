@@ -1325,7 +1325,7 @@ begin
 
     mpv_command_(['loadfile', FFileName]);
 
-    mpv_set_pause(not FAutoStart);
+    mpv_set_property_boolean('pause', not FAutoStart);
   end;
 end;
 
