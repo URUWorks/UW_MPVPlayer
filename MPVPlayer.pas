@@ -1319,7 +1319,13 @@ begin
   begin
     FStartAtPosMs := AStartAtPositionMs;
     FFileName := AFileName;
+
+    Loop(0, 0);
+    FPausePosMs := -1;
+
     mpv_command_(['loadfile', FFileName]);
+
+    mpv_set_property_boolean('pause', not FAutoStart);
   end;
 end;
 
