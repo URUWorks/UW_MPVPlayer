@@ -1,0 +1,19 @@
+2.1 (17/09/2026)
+
+* Refactored the player architecture by introducing the new `TMPVCore` class, separating libmpv playback and event management from the visual `TMPVPlayer` control.
+* Moved libmpv initialization, shutdown, commands, properties, playback, tracks, filters, OSD, screenshots and event handling into `TMPVCore`.
+* Added the `TMPVPlayer.Core` property for direct access to the underlying libmpv core.
+* Preserved the existing `TMPVPlayer` playback API through compatibility wrapper methods that delegate to `TMPVCore`.
+* Moved libmpv event handling to a dedicated `TMPVEventThread` owned by `TMPVCore`.
+* Improved libmpv and renderer shutdown synchronization, including explicit thread wake-up, termination and cleanup.
+* Improved OpenGL renderer thread lifecycle and synchronization with a dedicated ready event.
+* Improved OpenGL context destruction safety when the control is being destroyed or its native handle is no longer available.
+* Improved SDL2 renderer thread ownership and shutdown handling.
+* Added raw screenshot capture to `TBitmap` through `GetScreenshotToBitmap`.
+* Improved resize handling by avoiding redundant OSD/subtitle property updates.
+* Increased the default playback position update frequency from 140 ms to 33 ms.
+* Added Linux Wayland detection with automatic fallback from embedding to OpenGL rendering.
+* Added macOS Cocoa layer support through `NSView.setWantsLayer`.
+* Added macOS Metal capability detection and platform-specific renderer configuration.
+* Added platform-independent window handle retrieval through the new `GetWID` implementation.
+* Added `TMPVCore` to the registered Lazarus components.
