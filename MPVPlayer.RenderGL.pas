@@ -52,16 +52,17 @@ type
 
   TMPVPlayerRenderThread = class(TThread)
   private
-    FGL              : TUWOpenGLControl;
-    FWidth           : Integer;
-    FHeight          : Integer;
-    FError           : mpv_error;
-    mpvHandle        : Pmpv_handle;
-    mpvRenderParams  : array of mpv_render_param;
-    mpvUpdateParams  : array of mpv_render_param;
-    mpvOpenGLParams  : mpv_opengl_init_params;
-    mpvRenderContext : pmpv_render_context;
-    mpvfbo           : mpv_opengl_fbo;
+    FGL: TUWOpenGLControl;
+    FWidth: Integer;
+    FHeight: Integer;
+    FError: mpv_error;
+    mpvHandle: Pmpv_handle;
+    mpvRenderParams: array of mpv_render_param;
+    mpvUpdateParams: array of mpv_render_param;
+    mpvOpenGLParams: mpv_opengl_init_params;
+    mpvRenderContext: pmpv_render_context;
+    mpvfbo: mpv_opengl_fbo;
+    ReadyEvent: PRTLEvent;
     function InitializeRenderContext: Boolean;
     procedure UnInitializeRenderContext;
     function IsDestroyingGL: Boolean;
@@ -69,11 +70,11 @@ type
   protected
     procedure TerminatedSet; override;
   public
-    Owner : TMPVPlayerRenderGL;
-    Event : PRTLEvent;
+    Owner: TMPVPlayerRenderGL;
+    Event: PRTLEvent;
     IsRenderActive : Boolean;
-    ForceInvalidateContext : Boolean;
-    Ready : Boolean;
+    ForceInvalidateContext: Boolean;
+    Ready: Boolean;
     {$IFDEF BGLCONTROLS}
     FDrawCallback: TMPVPlayerDrawEvent;
     {$ENDIF}
@@ -88,16 +89,16 @@ type
 
   TMPVPlayerRenderGL = class
   private
-    FThread : TMPVPlayerRenderThread;
+    FThread: TMPVPlayerRenderThread;
     function GetRenderActive: Boolean;
   public
-    constructor Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+    constructor Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle{$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
     destructor Destroy; override;
     procedure Terminate;
     procedure Render(const ForceInvalidate: Boolean = False);
     procedure UpdateThreadSize(const w, h: Integer);
 
-    property Active : Boolean read GetRenderActive;
+    property Active: Boolean read GetRenderActive;
   end;
 
 // -----------------------------------------------------------------------------
@@ -149,29 +150,30 @@ begin
   inherited Create(True);
 
   FreeOnTerminate := False;
-  Event           := RTLEventCreate;
-  Owner           := AOwner;
-  mpvHandle       := AHandle;
+  Event := RTLEventCreate;
+  ReadyEvent := RTLEventCreate;
+  Owner := AOwner;
+  mpvHandle := AHandle;
   {$IFDEF BGLCONTROLS}
   FDrawCallback := ADrawCallback;
   {$ENDIF}
-  FGL     := AControl;
-  FWidth  := FGL.ClientWidth;
+  FGL := AControl;
+  FWidth := FGL.ClientWidth;
   FHeight := FGL.ClientHeight;
   FGL.ReleaseContext;
 
-  IsRenderActive         := False;
+  IsRenderActive := False;
   ForceInvalidateContext := False;
-  Ready                  := False;
-  mpvRenderContext       := NIL;
+  Ready := False;
+  mpvRenderContext := NIL;
 end;
 
 // -----------------------------------------------------------------------------
 
 destructor TMPVPlayerRenderThread.Destroy;
 begin
-  UnInitializeRenderContext;
   RTLEventDestroy(Event);
+  RTLEventDestroy(ReadyEvent);
   Owner := NIL;
   mpvHandle := NIL;
 
@@ -191,25 +193,29 @@ end;
 
 procedure TMPVPlayerRenderThread.Execute;
 begin
-  if not InitializeRenderContext then
-    Exit;
-
-  while not Terminated do
+  if InitializeRenderContext then
   begin
-    RTLEventWaitFor(Event);
-    try
-      if ForceInvalidateContext then
-      begin
-        ForceInvalidateContext := False;
-        InvalidateContext(False);
-      end
-      else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then //while IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) do
-        InvalidateContext;
-    except
-    end;
+    while not Terminated do
+    begin
+      RTLEventWaitFor(Event);
+      try
+        if ForceInvalidateContext then
+        begin
+          ForceInvalidateContext := False;
+          InvalidateContext(False);
+        end
+        else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then
+          InvalidateContext;
+      except
+        //on E: Exception do
+        //  DebugLog('RenderGL Thread EXCEPTION: ' + E.ClassName + ': ' + E.Message);
+      end;
 
-    RTLEventResetEvent(Event);
+      RTLEventResetEvent(Event);
+    end;
   end;
+
+  UnInitializeRenderContext;
 end;
 
 // -----------------------------------------------------------------------------
@@ -252,6 +258,7 @@ begin
     Result := True;
   finally
     Ready := True;
+    RTLEventSetEvent(ReadyEvent);
   end;
 end;
 
@@ -261,9 +268,15 @@ procedure TMPVPlayerRenderThread.UnInitializeRenderContext;
 begin
   if Assigned(mpvRenderContext) then
   begin
+    if not IsDestroyingGL then
+      FGL.MakeCurrent();
+
     mpv_render_context_set_update_callback(mpvRenderContext^, NIL, NIL);
     mpv_render_context_free(mpvRenderContext^);
     mpvRenderContext := NIL;
+
+    if not IsDestroyingGL then
+      FGL.ReleaseContext;
   end;
 
   SetLength(mpvRenderParams, 0);
@@ -275,7 +288,7 @@ end;
 
 function TMPVPlayerRenderThread.IsDestroyingGL: Boolean;
 begin
-  Result := (csDestroying in FGL.ComponentState);
+  Result := not Assigned(FGL) or (csDestroying in FGL.ComponentState) or not FGL.HandleAllocated;
 end;
 
 // -----------------------------------------------------------------------------
@@ -331,13 +344,13 @@ end;
 
 // -----------------------------------------------------------------------------
 
-constructor TMPVPlayerRenderGL.Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle {$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
+constructor TMPVPlayerRenderGL.Create(AControl: TUWOpenGLControl; AHandle: Pmpv_handle{$IFDEF BGLCONTROLS}; ADrawCallback: TMPVPlayerDrawEvent = NIL{$ENDIF});
 begin
   if Initialize_libMPV_Render(hLibMPV) then
   begin
-    FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self {$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
+    FThread := TMPVPlayerRenderThread.Create(AControl, AHandle, Self{$IFDEF BGLCONTROLS}, ADrawCallback{$ENDIF});
     FThread.Start;
-    while not FThread.Ready do Sleep(100);
+    RTLEventWaitFor(FThread.ReadyEvent, 5000);
   end;
 end;
 
@@ -355,7 +368,11 @@ procedure TMPVPlayerRenderGL.Terminate;
 begin
   if Assigned(FThread) then
   begin
+    if Assigned(FThread.mpvRenderContext) and Assigned(FThread.mpvRenderContext^) then
+      mpv_render_context_set_update_callback(FThread.mpvRenderContext^, NIL, NIL);
+
     FThread.Terminate;
+    RTLEventSetEvent(FThread.Event);
     FThread.WaitFor;
     FreeAndNil(FThread);
   end;
@@ -393,4 +410,5 @@ end;
 // -----------------------------------------------------------------------------
 
 end.
+
 

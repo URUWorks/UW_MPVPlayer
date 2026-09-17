@@ -15,7 +15,7 @@
  *  implied. See the License for the specific language governing
  *  rights and limitations under the License.
  *
- *  Copyright (C) 2021-2024 URUWorks, uruworks@gmail.com.
+ *  Copyright (C) 2021-2026 URUWorks, uruworks@gmail.com.
  *}
 
 unit MPVPlayer.RenderSDL;
@@ -41,24 +41,24 @@ type
 
   TMPVPlayerRenderThread = class(TThread)
   private
-    FHandle          : HWND;
-    FError           : mpv_error;
-    mpvHandle        : Pmpv_handle;
-    mpvRenderParams  : array of mpv_render_param;
-    mpvUpdateParams  : array of mpv_render_param;
-    mpvRenderContext : pmpv_render_context;
-    sdlWindow        : PSDL_Window;
-    sdlRenderer      : PSDL_Renderer;
-    sdlTexture       : PSDL_Texture;
-    sdlTexSize       : array[0..1] of Integer;
+    FHandle: HWND;
+    FError: mpv_error;
+    mpvHandle: Pmpv_handle;
+    mpvRenderParams: array of mpv_render_param;
+    mpvUpdateParams: array of mpv_render_param;
+    mpvRenderContext: pmpv_render_context;
+    sdlWindow: PSDL_Window;
+    sdlRenderer: PSDL_Renderer;
+    sdlTexture: PSDL_Texture;
+    sdlTexSize: array[0..1] of Integer;
     procedure InvalidateContext;
   protected
     procedure TerminatedSet; override;
   public
-    Owner : TMPVPlayerRenderSDL;
-    Event : PRTLEvent;
-    IsRenderActive : Boolean;
-    ForceInvalidateContext : Boolean;
+    Owner: TMPVPlayerRenderSDL;
+    Event: PRTLEvent;
+    IsRenderActive: Boolean;
+    ForceInvalidateContext: Boolean;
     constructor Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle; AOwner: TMPVPlayerRenderSDL);
     destructor Destroy; override;
     procedure Execute; override;
@@ -70,14 +70,14 @@ type
 
   TMPVPlayerRenderSDL = class
   private
-    FThread : TMPVPlayerRenderThread;
+    FThread: TMPVPlayerRenderThread;
     function GetRenderActive: Boolean;
   public
     constructor Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_handle);
     destructor Destroy; override;
     procedure Render(const ForceInvalidate: Boolean = False);
 
-    property Active : Boolean read GetRenderActive;
+    property Active: Boolean read GetRenderActive;
   end;
 
 // -----------------------------------------------------------------------------
@@ -105,7 +105,7 @@ constructor TMPVPlayerRenderThread.Create(ACtrlHandle: HWND; AMPVHandle: Pmpv_ha
 begin
   inherited Create(True);
 
-  FreeOnTerminate := True;
+  FreeOnTerminate := False;
   Event := RTLEventCreate;
   FHandle := ACtrlHandle;
   mpvHandle := AMPVHandle;
@@ -144,15 +144,18 @@ begin
   while not Terminated do
   begin
     RTLEventWaitFor(Event);
-
-    if ForceInvalidateContext then
-    begin
-      ForceInvalidateContext := False;
-      InvalidateContext;
-    end
-    else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then //while ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) <> 0) do
-      InvalidateContext;
-
+    try
+      if ForceInvalidateContext then
+      begin
+        ForceInvalidateContext := False;
+        InvalidateContext;
+      end
+      else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then
+        InvalidateContext;
+    except
+      //on E: Exception do
+        //DebugLog('RenderSDL Thread EXCEPTION: ' + E.ClassName + ': ' + E.Message);
+    end;
     RTLEventResetEvent(Event);
   end;
 end;
@@ -296,10 +299,9 @@ begin
   if Assigned(FThread) then
   begin
     FThread.Terminate;
-    {$IFDEF WINDOWS}
+    RTLEventSetEvent(FThread.Event);
     FThread.WaitFor;
-    {$ENDIF}
-    FThread := NIL;
+    FreeAndNil(FThread);
   end;
 
   inherited Destroy;

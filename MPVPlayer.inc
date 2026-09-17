@@ -19,6 +19,9 @@
  *}
 
 {$mode ObjFPC}{$H+}
+{$IFDEF DARWIN}
+  {$modeswitch Objectivec1}
+{$ENDIF}
 {$DEFINE USETIMER}
 {$DEFINE WID_AS_STRING}
 {$DEFINE ENABLE_BACKIMAGE}
