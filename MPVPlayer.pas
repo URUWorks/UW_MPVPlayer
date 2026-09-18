@@ -2306,7 +2306,8 @@ begin
   {$IFDEF LINUX}
   Widget := PGtkWidget(Self.Handle);
 
-  if not gtk_widget_get_realized(Widget) then
+  //if not gtk_widget_get_realized(Widget) then
+  if (gtk_widget_get_flags(Widget) and GTK_REALIZED) = 0 then
     gtk_widget_realize(Widget);
 
   if Assigned(Widget) and Assigned(Widget^.window) then
