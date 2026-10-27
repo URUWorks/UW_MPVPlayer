@@ -31,7 +31,9 @@ uses
   LResources, LazarusPackageIntf, libMPV.Client,
   MPVPlayer.RenderGL, OpenGLContext, MPVPlayer.Filters
   {$IFDEF DARWIN}, dynlibs, CocoaAll{$ENDIF}
-  {$IFDEF LINUX}, gtk2, gdk2x{$ENDIF}
+  {$IFDEF LCLGTK2}, gtk2, gdk2x{$ENDIF}
+  {$IFDEF LCLGTK3}, gtk3widgets, LazGtk3, LazGdk3{$ENDIF}
+  {$IF DEFINED(LCLQt5) OR DEFINED(LCLQt6)}, qt5, qtwidgets{$ENDIF}
   {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF}
   {$IFDEF SDL2}, sdl2lib, libMPV.Render, MPVPlayer.RenderSDL{$ENDIF};
 
@@ -49,6 +51,23 @@ type
   TMPVPlayerEventReceived = procedure(ASender: TObject; AEvent: Pmpv_event) of object;
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
   TMPVPlayerEndFileEvent = procedure(ASender: TObject; AReason, AError: Integer) of object;
+  {$IFDEF ENABLE_EXT_EVENTS}
+  TMPVVideoResizeEvent = procedure(ASender: TObject; const AWidth, AHeight: Integer) of object;
+  {$ENDIF}
+  {$IFDEF ENABLE_EXT_STATUS}
+  TMPVStatus = (
+    msIdle,            // mpv: propiedad 'idle-active' = True
+    msLoading,         // entre MPV_EVENT_START_FILE y MPV_EVENT_FILE_LOADED
+    msPlaying,
+    msPaused,          // mpv: propiedad 'pause' = True
+    msPausedForCache,  // mpv: propiedad 'paused-for-cache' = True
+    msEndOfFile,       // MPV_EVENT_END_FILE, reason = MPV_END_FILE_REASON_EOF
+    msStopped,         // MPV_EVENT_END_FILE, reason = MPV_END_FILE_REASON_STOP
+    msError,           // MPV_EVENT_END_FILE, reason = MPV_END_FILE_REASON_ERROR
+    msUnloading        // no existe en mpv; guard interno de cierre
+  );
+  TMPVStatusChangeEvent = procedure(Sender: TObject; OldStatus, NewStatus: TMPVStatus) of object;
+  {$ENDIF}
   TMPVPlayerLogEvent = procedure(ASender: TObject; APrefix, ALevel, AText: String) of object;
   TMPVPlayerGetReplyEvent = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error; event_property: Pmpv_event_property) of object;
   TMPVPlayerSetReplyEvent = procedure(ASender: TObject; reply_userdata: Integer; error_code: mpv_error) of object;
@@ -100,7 +119,9 @@ type
     FAutoStart: Boolean;
     FAutoLoadSub: Boolean;
     FUseHWDec: Boolean;
+    {$IFDEF ENABLE_SMPTE}
     FSMPTEMode: Boolean;
+    {$ENDIF}
     FStartAtPosMs: Integer;
     FPausePosMs: Integer;
     FFileName: String;
@@ -127,6 +148,19 @@ type
     FOnEndFile: TMPVPlayerEndFileEvent;
     FOnFileLoaded: TNotifyEvent;
     FOnVideoReconfig: TNotifyEvent;
+    FOnInternalVideoReconfig: TNotifyEvent; // uso interno
+    {$IFDEF ENABLE_EXT_EQUALIZER}
+    FEqBands: array[0..9] of Double;
+    FPreampDb: Double;
+    FEqualizerEnabled: Boolean;
+    {$ENDIF}
+    {$IFDEF ENABLE_EXT_EVENTS}
+    FOnVideoResize: TMPVVideoResizeEvent;
+    {$ENDIF}
+    {$IFDEF ENABLE_EXT_STATUS}
+    FStatus: TMPVStatus;
+    FOnStatusChange: TMPVStatusChangeEvent;
+    {$ENDIF}
     FOnAudioReconfig: TNotifyEvent;
     FOnTracksChanged: TNotifyEvent;
     FOnSeek: TMPVPlayerNotifyEvent;
@@ -148,6 +182,10 @@ type
 
     {$IFDEF USETIMER}
     procedure DoTimer(Sender: TObject);
+    {$ENDIF}
+
+    {$IFDEF ENABLE_EXT_STATUS}
+    procedure SetStatus(const ANewStatus: TMPVStatus);
     {$ENDIF}
   public
     constructor Create(AOwner: TComponent); override;
@@ -193,6 +231,15 @@ type
     function GetMediaPosInMs: Integer;
     procedure SetMediaPosInMs(const AValue: Integer);
     procedure SeekInMs(const MSecs: Integer; const SeekAbsolute: Boolean = True);
+    procedure SeekInFrames(const AFrames: Int64; const SeekAbsolute: Boolean = True);
+    procedure SeekInSecs(const ASecs: Double; const SeekAbsolute: Boolean = True);
+    procedure SeekInPercent(const APercent: Double);
+    procedure SeekTo(const AValue: Double; const AMethod: String); // 'exact', 'keyframes'
+    function GetCurrentFrame: Int64;
+    function GetMediaPosInSecs: Double;
+    function GetMediaLenInSecs: Double;
+    function GetMediaLenInFrames: Int64;
+    procedure StepFrames(const AFrames: Integer; const AFPS: Double);
     procedure NextFrame(const AStep: Integer = 1);
     procedure PreviousFrame(const AStep: Integer = 1);
     procedure SetPlaybackRate(const AValue: Byte);
@@ -245,8 +292,29 @@ type
     property Version: DWord read FVersion;
     property VersionString: String read GetVersionString;
     property Initialized: Boolean read FInitialized;
+    property OnInternalVideoReconfig: TNotifyEvent read FOnInternalVideoReconfig write FOnInternalVideoReconfig;
+    {$IFDEF ENABLE_EXT_EQUALIZER}
+    function BuildEqualizerString: String;
+    procedure ApplyEqualizer;
+    procedure SetEqualizerBand(const ABand: Integer; const AdB: Double);
+    function GetEqualizerBand(const ABand: Integer): Double;
+    procedure SetEqualizerPreset(const AValues: String); // "0:0:0:0:0:0:0:0:0:0"
+    function GetEqualizerPreset: String;
+    procedure ResetEqualizer;
+    procedure EnableEqualizer(const AEnable: Boolean);
+    procedure SetPreamp(const AdB: Double);
+    property EqualizerEnabled: Boolean read FEqualizerEnabled;
+    {$ENDIF}
     property TrackList: TMPVPlayerTrackList read FTrackList;
     property FileName: String read FFileName;
+    property FormatSettings: TFormatSettings read FFormatSettings;
+    {$IFDEF ENABLE_EXT_EVENTS}
+    property OnVideoResize: TMPVVideoResizeEvent read FOnVideoResize write FOnVideoResize;
+    {$ENDIF}
+    {$IFDEF ENABLE_EXT_STATUS}
+    property Status: TMPVStatus read FStatus;
+    property OnStatusChange: TMPVStatusChangeEvent read FOnStatusChange write FOnStatusChange;
+    {$ENDIF}
   published
     property AutoStartPlayback: Boolean read FAutoStart write FAutoStart;
     property AutoLoadSubtitle: Boolean read FAutoLoadSub write FAutoLoadSub;
@@ -255,7 +323,9 @@ type
     property StartOptions: TStringList read FStartOptions;
     property MPVFileName: String read FMPVFileName write FMPVFileName;
     property YTDLPFileName: String read FYTDLPFileName write FYTDLPFileName;
+    {$IFDEF ENABLE_SMPTE}
     property SMPTEMode: Boolean read FSMPTEMode write FSMPTEMode;
+    {$ENDIF}
 
     property OnEventReceived: TMPVPlayerEventReceived read FOnEventReceived write FOnEventReceived;
     property OnStartFile: TNotifyEvent read FOnStartFile write FOnStartFile;
@@ -327,8 +397,10 @@ type
     procedure SetMPVFileName(const AValue: String);
     function GetYTDLPFileName: String;
     procedure SetYTDLPFileName(const AValue: String);
+    {$IFDEF ENABLE_SMPTE}
     function GetSMPTEMode: Boolean;
     procedure SetSMPTEMode(const AValue: Boolean);
+    {$ENDIF}
 
     function GetOnEventReceived: TMPVPlayerEventReceived;
     procedure SetOnEventReceived(const AValue: TMPVPlayerEventReceived);
@@ -340,6 +412,15 @@ type
     procedure SetOnFileLoaded(const AValue: TNotifyEvent);
     function GetOnVideoReconfig: TNotifyEvent;
     procedure SetOnVideoReconfig(const AValue: TNotifyEvent);
+    {$IFDEF ENABLE_EXT_EVENTS}
+    function GetOnVideoResize: TMPVVideoResizeEvent;
+    procedure SetOnVideoResize(const AValue: TMPVVideoResizeEvent);
+    {$ENDIF}
+    {$IFDEF ENABLE_EXT_STATUS}
+    function GetStatus: TMPVStatus;
+    function GetOnStatusChange: TMPVStatusChangeEvent;
+    procedure SetOnStatusChange(const AValue: TMPVStatusChangeEvent);
+    {$ENDIF}
     function GetOnAudioReconfig: TNotifyEvent;
     procedure SetOnAudioReconfig(const AValue: TNotifyEvent);
     function GetOnTracksChanged: TNotifyEvent;
@@ -383,6 +464,8 @@ type
 
     procedure DoOnPaint(Sender: TObject);
     procedure DoOnGLResize(Sender: TObject);
+    procedure RecalcOSDMetrics;
+    procedure DoInternalVideoReconfig(Sender: TObject);
   protected
     {$IFDEF DARWIN}
     procedure CreateWnd; override;
@@ -438,6 +521,14 @@ type
     function GetMediaPosInMs: Integer;
     procedure SetMediaPosInMs(const AValue: Integer);
     procedure SeekInMs(const MSecs: Integer; const SeekAbsolute: Boolean = True);
+    procedure SeekInFrames(const AFrames: Int64; const SeekAbsolute: Boolean = True);
+    procedure SeekInSecs(const ASecs: Double; const SeekAbsolute: Boolean = True);
+    procedure SeekInPercent(const APercent: Double);
+    procedure SeekTo(const AValue: Double; const AMethod: String);
+    function GetCurrentFrame: Int64;
+    function GetMediaPosInSecs: Double;
+    function GetMediaLenInSecs: Double;
+    function GetMediaLenInFrames: Int64;
     procedure NextFrame(const AStep: Integer = 1);
     procedure PreviousFrame(const AStep: Integer = 1);
     procedure SetPlaybackRate(const AValue: Byte);
@@ -469,6 +560,17 @@ type
     procedure ClearVideoFilters;
     procedure SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters);
     procedure ClearAudioFilters;
+
+    {$IFDEF ENABLE_EXT_EQUALIZER}
+    procedure SetEqualizerBand(const ABand: Integer; const AdB: Double);
+    function GetEqualizerBand(const ABand: Integer): Double;
+    procedure SetEqualizerPreset(const AValues: String);
+    function GetEqualizerPreset: String;
+    procedure ResetEqualizer;
+    procedure EnableEqualizer(const AEnable: Boolean);
+    procedure ApplyEqualizer;
+    procedure SetPreamp(const AdB: Double);
+    {$ENDIF}
 
     // OSD / SUBTITULOS
     procedure ShowOverlayText(const AText: String; const ATags: String = '{\an2}');
@@ -574,13 +676,22 @@ type
     property StartOptions: TStringList read GetStartOptions;
     property MPVFileName: String read GetMPVFileName write SetMPVFileName;
     property YTDLPFileName: String read GetYTDLPFileName write SetYTDLPFileName;
+    {$IFDEF ENABLE_SMPTE}
     property SMPTEMode: Boolean read GetSMPTEMode write SetSMPTEMode;
+    {$ENDIF}
 
     property OnEventReceived: TMPVPlayerEventReceived read GetOnEventReceived write SetOnEventReceived;
     property OnStartFile: TNotifyEvent read GetOnStartFile write SetOnStartFile;
     property OnEndFile: TMPVPlayerEndFileEvent read GetOnEndFile write SetOnEndFile;
     property OnFileLoaded: TNotifyEvent read GetOnFileLoaded write SetOnFileLoaded;
     property OnVideoReconfig: TNotifyEvent read GetOnVideoReconfig write SetOnVideoReconfig;
+    {$IFDEF ENABLE_EXT_EVENTS}
+    property OnVideoResize: TMPVVideoResizeEvent read GetOnVideoResize write SetOnVideoResize;
+    {$ENDIF}
+    {$IFDEF ENABLE_EXT_STATUS}
+    property Status: TMPVStatus read GetStatus;
+    property OnStatusChange: TMPVStatusChangeEvent read GetOnStatusChange write SetOnStatusChange;
+    {$ENDIF}
     property OnAudioReconfig: TNotifyEvent read GetOnAudioReconfig write SetOnAudioReconfig;
     property OnTracksChanged: TNotifyEvent read GetOnTracksChanged write SetOnTracksChanged;
     property OnSeek: TMPVPlayerNotifyEvent read GetOnSeek write SetOnSeek;
@@ -638,6 +749,20 @@ begin
 
   Result := (FMetalSupportCache = 1);
 end;
+{$ENDIF}
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF ENABLE_EXT_EQUALIZER}
+const
+  MPV_EQ_FREQUENCIES: array[0..9] of Integer =
+    (31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000);
+
+  MPV_EQ_LABELS: array[0..9] of String =
+    ('@mpveq_0', '@mpveq_1', '@mpveq_2', '@mpveq_3', '@mpveq_4',
+     '@mpveq_5', '@mpveq_6', '@mpveq_7', '@mpveq_8', '@mpveq_9');
+
+  MPV_EQ_PREAMP_LABEL = '@mpveq_preamp';
 {$ENDIF}
 
 // -----------------------------------------------------------------------------
@@ -739,7 +864,9 @@ begin
   FAutoStart := True;
   FAutoLoadSub := False;
   FUseHWDec := False;
+  {$IFDEF ENABLE_SMPTE}
   FSMPTEMode := False;
+  {$ENDIF}
   FPausePosMs := -1;
   FFileName := '';
   FMPVFileName := '';
@@ -872,6 +999,11 @@ begin
     {$ENDIF}
     mpv_observe_property(FMPV_HANDLE^, 0, 'eof-reached', MPV_FORMAT_FLAG);
     mpv_observe_property(FMPV_HANDLE^, 0, 'cache-buffering-state', MPV_FORMAT_INT64);
+    {$IFDEF ENABLE_EXT_STATUS}
+    mpv_observe_property(FMPV_HANDLE^, 0, 'pause', MPV_FORMAT_FLAG);
+    mpv_observe_property(FMPV_HANDLE^, 0, 'paused-for-cache', MPV_FORMAT_FLAG);
+    mpv_observe_property(FMPV_HANDLE^, 0, 'idle-active', MPV_FORMAT_FLAG);
+    {$ENDIF}
 
     FError := mpv_initialize(FMPV_HANDLE^);
     if FError <> MPV_ERROR_SUCCESS then
@@ -927,6 +1059,9 @@ begin
   if CS then EnterCriticalSection(FUnInitCS);
   try
     if not FInitialized then Exit;
+    {$IFDEF ENABLE_EXT_STATUS}
+    SetStatus(msUnloading);
+    {$ENDIF}
     FInitialized := False;
 
     {$IFDEF USETIMER}
@@ -969,6 +1104,21 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
+
+{$IFDEF ENABLE_EXT_STATUS}
+procedure TMPVCore.SetStatus(const ANewStatus: TMPVStatus);
+var
+  OldStatus: TMPVStatus;
+begin
+  if FStatus = ANewStatus then Exit;
+  OldStatus := FStatus;
+  FStatus := ANewStatus;
+  if Assigned(FOnStatusChange) then
+    FOnStatusChange(Self, OldStatus, ANewStatus);
+end;
+
+// -----------------------------------------------------------------------------
+{$ENDIF}
 
 function TMPVCore.IsLibMPVAvailable: Boolean;
 begin
@@ -1395,6 +1545,13 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function TMPVCore.GetMediaLenInSecs: Double;
+begin
+  Result := mpv_get_property_double('duration');
+end;
+
+// -----------------------------------------------------------------------------
+
 function TMPVCore.GetMediaPosInMs: Integer;
 var
   i: Double;
@@ -1402,10 +1559,27 @@ begin
   if FPausePosMs > -1 then Exit(FPausePosMs);
   i := mpv_get_property_double('time-pos') * 1000.0;
 
+  {$IFDEF ENABLE_SMPTE}
   if FSMPTEMode then
     Result := Round(i / 1.001)
   else
     Result := Round(i);
+  {$ELSE}
+  Result := Round(i);
+  {$ENDIF}
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVCore.GetMediaPosInSecs: Double;
+begin
+  if FPausePosMs > -1 then Exit(FPausePosMs / 1000.0);
+  Result := mpv_get_property_double('time-pos');
+
+  {$IFDEF ENABLE_SMPTE}
+  if FSMPTEMode then
+    Result := Result / 1.001;
+  {$ENDIF}
 end;
 
 // -----------------------------------------------------------------------------
@@ -1419,8 +1593,10 @@ begin
     FPausePosMs := AValue;
 
   i := AValue / 1000.0;
+  {$IFDEF ENABLE_SMPTE}
   if FSMPTEMode then
     i := i * 1.001;
+  {$ENDIF}
 
   s := FloatToStr(i, FFormatSettings);
   mpv_command_(['seek', PChar(s), 'absolute+exact']);
@@ -1438,23 +1614,124 @@ end;
 
 // -----------------------------------------------------------------------------
 
+procedure TMPVCore.SeekInFrames(const AFrames: Int64; const SeekAbsolute: Boolean = True);
+var
+  f: Double;
+  TargetFrame: Int64;
+  s: String;
+begin
+  f := GetVideoFPS;
+  if f <= 0 then Exit;
+
+  if SeekAbsolute then
+  begin
+    TargetFrame := AFrames;
+    s := FloatToStr(TargetFrame / f, FFormatSettings);
+    mpv_command_(['seek', s, 'absolute+exact']);
+  end
+  else
+  begin
+    s := FloatToStr(AFrames / f, FFormatSettings);
+    mpv_command_(['seek', s, 'relative+exact']);
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SeekInSecs(const ASecs: Double; const SeekAbsolute: Boolean = True);
+var
+  s: String;
+begin
+  s := FloatToStr(ASecs, FFormatSettings);
+  if SeekAbsolute then
+    mpv_command_(['seek', s, 'absolute+exact'])
+  else
+    mpv_command_(['seek', s, 'relative+exact']);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SeekInPercent(const APercent: Double);
+begin
+  mpv_command_(['seek', FloatToStr(APercent, FFormatSettings), 'absolute-percent']);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SeekTo(const AValue: Double; const AMethod: String);
+begin
+  mpv_command_(['seek', FloatToStr(AValue, FFormatSettings), 'absolute', AMethod]);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVCore.GetCurrentFrame: Int64;
+var
+  f: Double;
+begin
+  Result := 0;
+  f := GetVideoFPS;
+  if f <= 0 then Exit;
+
+  if FPausePosMs > -1 then
+  begin
+    Result := Round((FPausePosMs / 1000.0) * f);
+    Exit;
+  end;
+
+  Result := Round(mpv_get_property_double('time-pos') * f);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVCore.GetMediaLenInFrames: Int64;
+begin
+  Result := GetVideoTotalFrames;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.StepFrames(const AFrames: Integer; const AFPS: Double);
+var
+  NewPos, Len: Integer;
+  Frame: Int64;
+begin
+  // Step from GetMediaPosInMs (it knows a seek done while paused that
+  // time-pos may not report yet) and move with SetMediaPosInMs, which keeps
+  // FPausePosMs updated. Before, time-pos was set directly and FPausePosMs
+  // kept the old position, so GetMediaPosInMs (and the waveform cursor)
+  // didn't change.
+
+  // Pause first, like mpv's frame-step does
+  if not IsPaused then
+  begin
+    mpv_set_pause(True);
+    if Assigned(FOnPause) then FOnPause(Self);
+  end;
+
+  // Work with frame numbers, adding rounded ms on every step drifts with
+  // non integer frame rates (23.976...). Ceil, so the exact seek lands
+  // inside the frame and not some microseconds before it (previous frame).
+  Frame  := Round(GetMediaPosInMs * AFPS / 1000) + AFrames;
+  if Frame < 0 then Frame := 0;
+  NewPos := Ceil(Frame * 1000 / AFPS);
+  Len := GetMediaLenInMs;
+  if NewPos < 0 then NewPos := 0;
+  if (Len > 0) and (NewPos > Len) then NewPos := Len;
+  SetMediaPosInMs(NewPos);
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVCore.NextFrame(const AStep: Integer = 1);
 var
   f: Double;
 begin
-  if AStep > 1 then
-  begin
-    f := GetVideoFPS;
-    if f > 0 then
-      SetMediaPosInMs(GetMediaPosInMs + FramesToMS(AStep, f));
-  end
-  else
-  begin
-    FPausePosMs := -1;
-    if (mpv_command_(['frame-step']) = MPV_ERROR_SUCCESS) and not IsPaused then
-      if Assigned(FOnPause) then
-        FOnPause(Self);
-  end;
+  // Exact seek also for one frame (instead of mpv's asynchronous frame-step),
+  // so the new position is known right away (e.g. for the waveform cursor)
+  f := GetVideoFPS;
+  if f > 0 then
+    StepFrames(Max(AStep, 1), f);
 end;
 
 // -----------------------------------------------------------------------------
@@ -1463,19 +1740,9 @@ procedure TMPVCore.PreviousFrame(const AStep: Integer = 1);
 var
   f: Double;
 begin
-  if AStep > 1 then
-  begin
-    f := GetVideoFPS;
-    if f > 0 then
-      SetMediaPosInMs(GetMediaPosInMs - FramesToMS(AStep, f));
-  end
-  else
-  begin
-    FPausePosMs := -1;
-    if (mpv_command_(['frame-back-step']) = MPV_ERROR_SUCCESS) and IsPaused then
-      if Assigned(FOnPause) then
-        FOnPause(Self);
-  end;
+  f := GetVideoFPS;
+  if f > 0 then
+    StepFrames(-Max(AStep, 1), f);
 end;
 
 // -----------------------------------------------------------------------------
@@ -1608,6 +1875,10 @@ begin
         end;
       end;
     except
+      {$IFDEF DEBUG}
+      on E: Exception do
+        Writeln('TMPVCore.GetTracks EXCEPTION: ', E.ClassName, ': ', E.Message);
+      {$ENDIF}
     end;
     mpv_free_node_contents(Node);
   end;
@@ -2016,7 +2287,12 @@ procedure TMPVCore.RemoveOption(const AValue: String);
 var
   i: Integer;
 begin
-  i := FStartOptions.IndexOfName(Copy(AValue, 1, Pos('=', AValue)));
+  // the name is without the "=" (before, it was included and the option was
+  // never found, so repeated options piled up with different values)
+  if Pos('=', AValue) > 0 then
+    i := FStartOptions.IndexOfName(Copy(AValue, 1, Pos('=', AValue)-1))
+  else
+    i := FStartOptions.IndexOf(AValue);
   if i > -1 then FStartOptions.Delete(i);
 end;
 
@@ -2077,6 +2353,133 @@ end;
 
 // -----------------------------------------------------------------------------
 
+{$IFDEF ENABLE_EXT_EQUALIZER}
+function TMPVCore.BuildEqualizerString: String;
+var
+  i: Integer;
+  Parts: TStringList;
+begin
+  Parts := TStringList.Create;
+  try
+    if FPreampDb <> 0 then
+      Parts.Add(Format('%s:volume=%.1fdB', [MPV_EQ_PREAMP_LABEL, FPreampDb], FFormatSettings));
+
+    for i := 0 to 9 do
+      if FEqBands[i] <> 0 then
+        Parts.Add(Format('%s:equalizer=f=%d:width_type=o:width=2:g=%.1f',
+          [MPV_EQ_LABELS[i], MPV_EQ_FREQUENCIES[i], FEqBands[i]], FFormatSettings));
+
+    Result := StringReplace(Parts.Text, sLineBreak, ',', [rfReplaceAll]);
+    Result := Result.TrimRight([',']);
+  finally
+    Parts.Free;
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.ApplyEqualizer;
+var
+  i: Integer;
+  FilterStr: String;
+begin
+  mpv_command_(['af-remove', MPV_EQ_PREAMP_LABEL]);
+  for i := 0 to 9 do
+    mpv_command_(['af-remove', MPV_EQ_LABELS[i]]);
+
+  if not FEqualizerEnabled then Exit;
+
+  FilterStr := BuildEqualizerString;
+  if not FilterStr.IsEmpty then
+    mpv_command_(['af-add', FilterStr]);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SetEqualizerBand(const ABand: Integer; const AdB: Double);
+begin
+  if (ABand < 0) or (ABand > 9) then Exit;
+  FEqBands[ABand] := EnsureRange(AdB, -20, 20);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVCore.GetEqualizerBand(const ABand: Integer): Double;
+begin
+  Result := 0;
+  if (ABand >= 0) and (ABand <= 9) then
+    Result := FEqBands[ABand];
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SetEqualizerPreset(const AValues: String);
+var
+  SL: TStringList;
+  i: Integer;
+begin
+  SL := TStringList.Create;
+  try
+    SL.Delimiter := ':';
+    SL.StrictDelimiter := True;
+    SL.DelimitedText := AValues;
+    for i := 0 to Min(9, SL.Count - 1) do
+      FEqBands[i] := EnsureRange(StrToFloatDef(SL[i], 0, FFormatSettings), -20, 20);
+  finally
+    SL.Free;
+  end;
+  ApplyEqualizer;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVCore.GetEqualizerPreset: String;
+var
+  i: Integer;
+  SL: TStringList;
+begin
+  SL := TStringList.Create;
+  try
+    for i := 0 to 9 do
+      SL.Add(FloatToStr(FEqBands[i], FFormatSettings));
+
+    SL.Delimiter := ':';
+    SL.StrictDelimiter := True;
+    Result := SL.DelimitedText;
+  finally
+    SL.Free;
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.ResetEqualizer;
+var
+  i: Integer;
+begin
+  for i := 0 to 9 do FEqBands[i] := 0;
+  FPreampDb := 0;
+  ApplyEqualizer;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.EnableEqualizer(const AEnable: Boolean);
+begin
+  FEqualizerEnabled := AEnable;
+  ApplyEqualizer;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SetPreamp(const AdB: Double);
+begin
+  FPreampDb := EnsureRange(AdB, -20, 20);
+end;
+{$ENDIF}
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVCore.ClearAudioFilters;
 begin
   SetAudioFilters([]);
@@ -2119,7 +2522,12 @@ begin
         OnLogMessage(Sender, Pmpv_event_log_message(Event^.Data)^.prefix, Pmpv_event_log_message(Event^.Data)^.level, Pmpv_event_log_message(Event^.Data)^.Text);
 
     MPV_EVENT_START_FILE:
+    begin
       if Assigned(OnStartFile) then OnStartFile(Sender);
+      {$IFDEF ENABLE_EXT_STATUS}
+      SetStatus(msLoading);
+      {$ENDIF}
+    end;
 
     MPV_EVENT_FILE_LOADED:
     begin
@@ -2133,14 +2541,29 @@ begin
         FStartAtPosMs := 0;
       end;
       if Assigned(OnFileLoaded) then OnFileLoaded(Sender);
+      {$IFDEF ENABLE_EXT_STATUS}
+      SetStatus(msPlaying);
+      {$ENDIF}
     end;
 
     MPV_EVENT_SEEK:
       if Assigned(OnSeek) then OnSeek(Sender, GetMediaPosInMs);
 
     MPV_EVENT_END_FILE:
-      if (Event^.Data <> NIL) and Assigned(OnEndFile) then
-        with Pmpv_event_end_file(Event^.data)^ do OnEndFile(Sender, reason, error);
+      if (Event^.Data <> NIL) then
+      begin
+        if Assigned(OnEndFile) then
+          with Pmpv_event_end_file(Event^.data)^ do OnEndFile(Sender, reason, error);
+        {$IFDEF ENABLE_EXT_STATUS}
+        case Pmpv_event_end_file(Event^.data)^.reason of
+          MPV_END_FILE_REASON_EOF:   SetStatus(msEndOfFile);
+          MPV_END_FILE_REASON_STOP:  SetStatus(msStopped);
+          MPV_END_FILE_REASON_ERROR: SetStatus(msError);
+        else
+          SetStatus(msStopped);
+        end;
+        {$ENDIF}
+      end;
 
     MPV_EVENT_VIDEO_RECONFIG, MPV_EVENT_AUDIO_RECONFIG:
     begin
@@ -2149,6 +2572,14 @@ begin
         OnVideoReconfig(Sender)
       else if (Event^.event_id = MPV_EVENT_AUDIO_RECONFIG) and Assigned(OnAudioReconfig) then
         OnAudioReconfig(Sender);
+
+      if (Event^.event_id = MPV_EVENT_VIDEO_RECONFIG) and Assigned(FOnInternalVideoReconfig) then
+        FOnInternalVideoReconfig(Sender);
+
+      {$IFDEF ENABLE_EXT_EVENTS}
+      if (Event^.event_id = MPV_EVENT_VIDEO_RECONFIG) and Assigned(FOnVideoResize) then
+        FOnVideoResize(Sender, GetVideoWidth, GetVideoHeight);
+      {$ENDIF}
 
       if Assigned(FOnTracksChanged) then FOnTracksChanged(Sender);
     end;
@@ -2186,8 +2617,35 @@ begin
       begin
         if Assigned(OnTimeChanged) and (Pmpv_event_property(Event^.Data)^.data <> NIL) then
           OnTimeChanged(Sender, PInteger(Pmpv_event_property(Event^.Data)^.data)^);
-      end;
+      end
       {$ENDIF}
+      {$IFDEF ENABLE_EXT_STATUS}
+      else if StrComp(PropName, 'pause') = 0 then
+      begin
+        if (Pmpv_event_property(Event^.Data)^.data <> NIL) then
+        begin
+          if PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1 then
+          begin
+            if not (FStatus in [msEndOfFile, msStopped, msError, msUnloading]) then
+              SetStatus(msPaused);
+          end
+          else if FStatus in [msPaused, msPausedForCache] then
+            SetStatus(msPlaying);
+        end;
+      end
+      else if StrComp(PropName, 'paused-for-cache') = 0 then
+      begin
+        if (Pmpv_event_property(Event^.Data)^.data <> NIL) and
+           (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
+          SetStatus(msPausedForCache);
+      end
+      else if StrComp(PropName, 'idle-active') = 0 then
+      begin
+        if (Pmpv_event_property(Event^.Data)^.data <> NIL) and
+           (PInteger(Pmpv_event_property(Event^.Data)^.data)^ = 1) then
+          SetStatus(msIdle);
+      end
+      {$ENDIF};
     end;
   end;
 end;
@@ -2238,6 +2696,7 @@ begin
   Caption := '';
 
   FCore := TMPVCore.Create(Self);
+  FCore.OnInternalVideoReconfig := @DoInternalVideoReconfig;
   FAspectRatio := arDefault;
   FFontSize := 55;
   FLastFontSize := -1;
@@ -2298,16 +2757,20 @@ end;
 // -----------------------------------------------------------------------------
 
 function TMPVPlayer.GetWID: Int64;
-{$IFDEF LINUX}
+{$IFDEF LCLGTK2}
 var
   Widget: PGtkWidget;
 {$ENDIF}
+{$IFDEF LCLGTK3}
+var
+  Widget3: PGtkWidget;
+  GdkWin3: PGdkWindow;
+{$ENDIF}
 begin
-  {$IFDEF LINUX}
+  {$IFDEF LCLGTK2}
   Widget := PGtkWidget(Self.Handle);
 
-  //if not gtk_widget_get_realized(Widget) then
-  if (gtk_widget_get_flags(Widget) and GTK_REALIZED) = 0 then
+  if not GTK_WIDGET_REALIZED(Widget) then
     gtk_widget_realize(Widget);
 
   if Assigned(Widget) and Assigned(Widget^.window) then
@@ -2315,7 +2778,31 @@ begin
   else
     Result := 0;
   {$ELSE}
-  Result := Int64(PtrUInt(Self.Handle)); // Windows(HWND) y macOS(NSView)
+    {$IFDEF LCLGTK3}
+    if not Self.HandleAllocated then
+      Self.HandleNeeded;
+
+    Widget3 := TGtk3Widget(Self.Handle).Widget;
+
+    if not gtk_widget_get_realized(Widget3) then
+      gtk_widget_realize(Widget3);
+
+    GdkWin3 := gtk_widget_get_window(Widget3);
+
+    if Assigned(GdkWin3) then
+      Result := Int64(gdk_x11_window_get_xid(GdkWin3))
+    else
+      Result := 0;
+    {$ELSE}
+      {$IF DEFINED(LCLQt5) OR DEFINED(LCLQt6)}
+      if not Self.HandleAllocated then
+        Self.HandleNeeded;
+
+      Result := Int64(QWidget_winId(TQtWidget(Self.Handle).Widget));
+      {$ELSE}
+      Result := Int64(PtrUInt(Self.Handle)); // Windows(HWND) y macOS(NSView)
+      {$ENDIF}
+    {$ENDIF}
   {$ENDIF}
 end;
 
@@ -2380,6 +2867,21 @@ end;
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayer.Resize;
+begin
+  inherited Resize;
+  RecalcOSDMetrics;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.DoInternalVideoReconfig(Sender: TObject);
+begin
+  RecalcOSDMetrics;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.RecalcOSDMetrics;
 var
   VideoW, VideoH: Integer;
   EffectiveW, EffectiveH: Double;
@@ -2388,8 +2890,6 @@ var
   MarginMultiplier: Double;
   NewFontSize, NewMarginX, NewMarginY: Int64;
 begin
-  inherited Resize;
-
   if Assigned(FCore) and FCore.Initialized then
   begin
     VideoW := FCore.GetVideoWidth;
@@ -2775,6 +3275,7 @@ end;
 
 // -----------------------------------------------------------------------------
 
+{$IFDEF ENABLE_SMPTE}
 function TMPVPlayer.GetSMPTEMode: Boolean;
 begin
   Result := FCore.SMPTEMode;
@@ -2788,6 +3289,7 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
+{$ENDIF}
 
 function TMPVPlayer.GetOnEventReceived: TMPVPlayerEventReceived;
 begin
@@ -2858,6 +3360,45 @@ begin
 end;
 
 // -----------------------------------------------------------------------------
+
+{$IFDEF ENABLE_EXT_EVENTS}
+function TMPVPlayer.GetOnVideoResize: TMPVVideoResizeEvent;
+begin
+  Result := FCore.OnVideoResize;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetOnVideoResize(const AValue: TMPVVideoResizeEvent);
+begin
+  FCore.OnVideoResize := AValue;
+end;
+
+// -----------------------------------------------------------------------------
+{$ENDIF}
+
+{$IFDEF ENABLE_EXT_STATUS}
+function TMPVPlayer.GetStatus: TMPVStatus;
+begin
+  Result := FCore.Status;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetOnStatusChange: TMPVStatusChangeEvent;
+begin
+  Result := FCore.OnStatusChange;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetOnStatusChange(const AValue: TMPVStatusChangeEvent);
+begin
+  FCore.OnStatusChange := AValue;
+end;
+
+// -----------------------------------------------------------------------------
+{$ENDIF}
 
 function TMPVPlayer.GetOnAudioReconfig: TNotifyEvent;
 begin
@@ -3039,7 +3580,6 @@ begin
   FCore.OnCommandReplyEvent := AValue;
 end;
 
-// -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
 
 function TMPVPlayer.IsLibMPVAvailable: Boolean;
@@ -3364,9 +3904,23 @@ end;
 
 // -----------------------------------------------------------------------------
 
+function TMPVPlayer.GetMediaLenInSecs: Double;
+begin
+  Result := FCore.GetMediaLenInSecs;
+end;
+
+// -----------------------------------------------------------------------------
+
 function TMPVPlayer.GetMediaPosInMs: Integer;
 begin
   Result := FCore.GetMediaPosInMs;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetMediaPosInSecs: Double;
+begin
+  Result := FCore.GetMediaPosInSecs;
 end;
 
 // -----------------------------------------------------------------------------
@@ -3381,6 +3935,48 @@ end;
 procedure TMPVPlayer.SeekInMs(const MSecs: Integer; const SeekAbsolute: Boolean = True);
 begin
   FCore.SeekInMs(MSecs, SeekAbsolute);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SeekInFrames(const AFrames: Int64; const SeekAbsolute: Boolean = True);
+begin
+  FCore.SeekInFrames(AFrames, SeekAbsolute);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SeekInSecs(const ASecs: Double; const SeekAbsolute: Boolean = True);
+begin
+  FCore.SeekInSecs(ASecs, SeekAbsolute);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SeekInPercent(const APercent: Double);
+begin
+  FCore.SeekInPercent(APercent);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SeekTo(const AValue: Double; const AMethod: String);
+begin
+  FCore.SeekTo(AValue, AMethod);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetCurrentFrame: Int64;
+begin
+  Result := FCore.GetCurrentFrame;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetMediaLenInFrames: Int64;
+begin
+  Result := FCore.GetMediaLenInFrames;
 end;
 
 // -----------------------------------------------------------------------------
@@ -3550,6 +4146,66 @@ procedure TMPVPlayer.SetAudioFilters(const AAudioFilters: TMPVPlayerAudioFilters
 begin
   FCore.SetAudioFilters(AAudioFilters);
 end;
+
+// -----------------------------------------------------------------------------
+
+{$IFDEF ENABLE_EXT_EQUALIZER}
+procedure TMPVPlayer.SetEqualizerBand(const ABand: Integer; const AdB: Double);
+begin
+  FCore.SetEqualizerBand(ABand, AdB);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetEqualizerBand(const ABand: Integer): Double;
+begin
+  Result := FCore.GetEqualizerBand(ABand);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetEqualizerPreset(const AValues: String);
+begin
+  FCore.SetEqualizerPreset(AValues);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetEqualizerPreset: String;
+begin
+  Result := FCore.GetEqualizerPreset;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ResetEqualizer;
+begin
+  FCore.ResetEqualizer;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.EnableEqualizer(const AEnable: Boolean);
+begin
+  FCore.EnableEqualizer(AEnable);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.ApplyEqualizer;
+begin
+  FCore.ApplyEqualizer;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetPreamp(const AdB: Double);
+begin
+  FCore.SetPreamp(AdB);
+end;
+
+// -----------------------------------------------------------------------------
+{$ENDIF}
 
 // -----------------------------------------------------------------------------
 

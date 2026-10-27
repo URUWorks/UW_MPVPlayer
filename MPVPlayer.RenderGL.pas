@@ -29,7 +29,8 @@ interface
 uses
   Classes, SysUtils, libMPV.Client, libMPV.Render, libMPV.Render_gl, gl, glext,
   OpenGLContext
-  {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF};
+  {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF}
+  {$IFDEF DARWIN}, CocoaAll{$ENDIF};
 
 // -----------------------------------------------------------------------------
 
@@ -192,30 +193,62 @@ end;
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayerRenderThread.Execute;
+{$IFDEF DARWIN}
+var
+  OuterPool, LoopPool: NSAutoreleasePool;
+{$ENDIF}
 begin
-  if InitializeRenderContext then
-  begin
-    while not Terminated do
-    begin
-      RTLEventWaitFor(Event);
-      try
-        if ForceInvalidateContext then
+  {$IFDEF DARWIN}
+  // On macOS, Cocoa/OpenGL autoreleased objects can trigger exceptions
+  // when the thread exits, causing an LCL modal alert and deadlock.
+  OuterPool := NSAutoreleasePool.alloc.init;
+  {$ENDIF}
+  try
+    try
+      if InitializeRenderContext then
+      begin
+        while not Terminated do
         begin
-          ForceInvalidateContext := False;
-          InvalidateContext(False);
-        end
-        else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then
-          InvalidateContext;
-      except
-        //on E: Exception do
-        //  DebugLog('RenderGL Thread EXCEPTION: ' + E.ClassName + ': ' + E.Message);
+          RTLEventWaitFor(Event);
+          {$IFDEF DARWIN}
+          LoopPool := NSAutoreleasePool.alloc.init;
+          {$ENDIF}
+          try
+            if ForceInvalidateContext then
+            begin
+              ForceInvalidateContext := False;
+              InvalidateContext(False);
+            end
+            else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then
+              InvalidateContext;
+          except
+            //on E: Exception do
+            //  DebugLog('RenderGL Thread EXCEPTION: ' + E.ClassName + ': ' + E.Message);
+          end;
+          {$IFDEF DARWIN}
+          try
+            LoopPool.release;
+          except
+          end;
+          {$ENDIF}
+
+          RTLEventResetEvent(Event);
+        end;
       end;
-
-      RTLEventResetEvent(Event);
+    except
     end;
+  finally
+    try
+      UnInitializeRenderContext;
+    except
+    end;
+    {$IFDEF DARWIN}
+    try
+      OuterPool.release;
+    except
+    end;
+    {$ENDIF}
   end;
-
-  UnInitializeRenderContext;
 end;
 
 // -----------------------------------------------------------------------------
@@ -365,6 +398,8 @@ end;
 // -----------------------------------------------------------------------------
 
 procedure TMPVPlayerRenderGL.Terminate;
+var
+  Deadline: QWord;
 begin
   if Assigned(FThread) then
   begin
@@ -373,8 +408,20 @@ begin
 
     FThread.Terminate;
     RTLEventSetEvent(FThread.Event);
-    FThread.WaitFor;
-    FreeAndNil(FThread);
+
+    // Use a bounded wait to prevent application hangs during thread shutdown.
+    // If the thread gets stuck, the thread object is leaked.
+    Deadline := GetTickCount64 + 3000;
+    while not FThread.Finished and (GetTickCount64 < Deadline) do
+    begin
+      RTLEventSetEvent(FThread.Event);
+      Sleep(10);
+    end;
+
+    if FThread.Finished then
+      FreeAndNil(FThread)
+    else
+      FThread := NIL;
   end;
 end;
 
