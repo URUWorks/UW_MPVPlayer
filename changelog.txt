@@ -1,3 +1,21 @@
+2.2 (26/10/2026)
+
+* Added `MPVPlayer.Extended.pas`, providing additional APIs for subtitle styling, video color adjustments, deinterlacing, cache configuration, audio output devices, audio normalization and stream information.
+* Added optional SMPTE timecode support through the `ENABLE_SMPTE` compiler directive.
+* Added frame-based seeking with `SeekInFrames`, `SeekInSecs`, `SeekInPercent` and `SeekTo`, including exact seeking and keyframe-based seeking.
+* Added current-frame and media-duration queries through `GetCurrentFrame`, `GetMediaLenInSecs` and `GetMediaLenInFrames`.
+* Improved frame stepping by introducing `StepFrames` and using frame-based calculations for next-frame and previous-frame navigation.
+* Fixed startup option handling in `AddOption`: option names are now correctly extracted before `=`, preventing duplicate options from accumulating instead of updating existing values.
+* Improved OSD and subtitle sizing by recalculating their metrics when the video is reconfigured or the preview control is resized.
+* Added optional video resize notifications through `OnVideoResize`, controlled by the `ENABLE_EXT_EVENTS` compiler directive.
+* Added optional playback status notifications through `OnStatusChange`, with states for idle, loading, playing, paused, buffering, end of file, stopped and errors. This feature is controlled by `ENABLE_EXT_STATUS`.
+* Added an optional 10-band audio equalizer with adjustable gain, presets, preamp and enable/disable functionality, controlled by `ENABLE_EXT_EQUALIZER`.
+* Improved track retrieval error diagnostics by adding exception logging in debug builds.
+* Improved macOS OpenGL rendering thread stability by introducing autorelease pools and safer render-context cleanup.
+* Improved OpenGL renderer shutdown by replacing the indefinite thread wait with a bounded wait, reducing the risk of application freezes during shutdown.
+* Added GTK3 and Qt5/Qt6 conditional support for obtaining the native video window handle, while retaining GTK2 support.
+* Updated GTK2 widget realization checks to use `GTK_WIDGET_REALIZED` instead of the unavailable `gtk_widget_get_flags` approach.
+
 2.1 (17/09/2026)
 
 * Refactored the player architecture by introducing the new `TMPVCore` class, separating libmpv playback and event management from the visual `TMPVPlayer` control.
