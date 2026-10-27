@@ -1,3 +1,7 @@
+2.3 (27/10/2026)
+
+* Improved: the video subtitle overlay is only sent to mpv when the text changes, reducing stutter during playback.
+
 2.2 (26/10/2026)
 
 * Added `MPVPlayer.Extended.pas`, providing additional APIs for subtitle styling, video color adjustments, deinterlacing, cache configuration, audio output devices, audio normalization and stream information.
