@@ -136,6 +136,8 @@ type
 
     FShowText: String;
     FText: String;
+    FOverlaySrc: String;   // last ShowOverlayText input (tags + text)
+    FOverlayValid: Boolean; // False: send the overlay again even if unchanged
     FTextNode: mpv_node;
     FTextNodeList: mpv_node_list;
     FTextNodeKeys: array of PChar;
@@ -1016,6 +1018,7 @@ begin
 
     FShowText := '';
     FText := '';
+    FOverlayValid := False;
     SetLength(FTextNodeKeys, 4);
     SetLength(FTextNodeValues, 4);
     FTextNodeKeys[0] := 'name';
@@ -1093,6 +1096,7 @@ begin
 
     FShowText := '';
     FText := '';
+    FOverlayValid := False;
     SetLength(FTextNodeKeys, 0);
     SetLength(FTextNodeValues, 0);
     SetLength(FTrackList, 0);
@@ -1962,6 +1966,12 @@ var
 begin
   if not FInitialized then Exit;
 
+  // it's called on every playback tick: only send the osd-overlay command
+  // (synchronous, libass renders it again) when the text changes
+  if FOverlayValid and (FOverlaySrc = ATags + #0 + AText) then Exit;
+  FOverlaySrc   := ATags + #0 + AText;
+  FOverlayValid := True;
+
   if AText.IsEmpty then
   begin
     FText := '';
@@ -2040,6 +2050,7 @@ end;
 procedure TMPVCore.SetTextColor(const AValue: String);
 begin
   mpv_set_option_string_('osd-color='+AValue);
+  FOverlayValid := False;
 end;
 
 // -----------------------------------------------------------------------------
@@ -2061,6 +2072,7 @@ end;
 procedure TMPVCore.SetTextSize(const AValue: Int64);
 begin
   mpv_set_property_int64('osd-font-size', AValue);
+  FOverlayValid := False;
 end;
 
 // -----------------------------------------------------------------------------
@@ -2068,6 +2080,7 @@ end;
 procedure TMPVCore.SetTextFont(const AValue: String);
 begin
   mpv_set_option_string_('osd-font='+AValue);
+  FOverlayValid := False;
 end;
 
 // -----------------------------------------------------------------------------
