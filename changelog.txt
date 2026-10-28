@@ -1,6 +1,14 @@
-2.3 (27/10/2026)
+2.3 (28/10/2026)
 
-* Improved: the video subtitle overlay is only sent to mpv when the text changes, reducing stutter during playback.
+* Fixed OpenGL rendering on GTK3 and Qt5/Qt6 by rendering on the main thread (`MPVGL_MAINTHREAD`); other platforms keep the render thread.
+* Fixed black video on GTK3 by disabling the depth buffer and resetting GL state before each render.
+* Fixed GTK3 rendering after moving the video panel to another form by recreating the render context.
+* Fixed GTK3 embedded-mode crashes (`X11 BadWindow`) by stopping mpv before destroying the native window and restarting it on Play.
+* Fixed Linux OpenGL function loading for EGL and GLX contexts.
+* Improved GTK3/Qt rendering updates, responsiveness, and callback cleanup.
+* Improved OSD and subtitle scaling with fractional font sizes.
+* Added `InvalidateOverlayText` to resend overlay text when OSD metrics change.
+* Reduced playback stutter by updating the subtitle overlay only when its text changes.
 
 2.2 (26/10/2026)
 
