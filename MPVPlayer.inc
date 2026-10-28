@@ -31,5 +31,11 @@
 {.$DEFINE BGLCONTROLS} // requires BGLControls package.
 {.$DEFINE SDL2} // requires pl_SDL2 package.
 
+// gtk3 (GtkGLArea) and qt5/qt6 (QWidget winId) can't drive the GL context
+// from a worker thread: render from the GUI thread, inside the paint event.
+{$IF DEFINED(LCLGTK3) OR DEFINED(LCLQt5) OR DEFINED(LCLQt6)}
+  {$DEFINE MPVGL_MAINTHREAD}
+{$ENDIF}
+
 
 

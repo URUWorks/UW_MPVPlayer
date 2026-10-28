@@ -33,7 +33,8 @@ uses
   {$IFDEF DARWIN}, dynlibs, CocoaAll{$ENDIF}
   {$IFDEF LCLGTK2}, gtk2, gdk2x{$ENDIF}
   {$IFDEF LCLGTK3}, gtk3widgets, LazGtk3, LazGdk3{$ENDIF}
-  {$IF DEFINED(LCLQt5) OR DEFINED(LCLQt6)}, qt5, qtwidgets{$ENDIF}
+  {$IFDEF LCLQt5}, qt5, qtwidgets{$ENDIF}
+  {$IFDEF LCLQt6}, qt6, qtwidgets{$ENDIF}
   {$IFDEF BGLCONTROLS}, BGRAOpenGL{$ENDIF}
   {$IFDEF SDL2}, sdl2lib, libMPV.Render, MPVPlayer.RenderSDL{$ENDIF};
 
@@ -136,7 +137,7 @@ type
 
     FShowText: String;
     FText: String;
-    FOverlaySrc: String;   // last ShowOverlayText input (tags + text)
+    FOverlaySrc: String; // last ShowOverlayText input (tags + text)
     FOverlayValid: Boolean; // False: send the overlay again even if unchanged
     FTextNode: mpv_node;
     FTextNodeList: mpv_node_list;
@@ -261,6 +262,7 @@ type
 
     // OSD / SUBTITULOS
     procedure ShowOverlayText(const AText: String; const ATags: String = '{\an2}');
+    procedure InvalidateOverlayText; // send the overlay again at the next ShowOverlayText (style changed)
     procedure ShowText(const AText: String; const ADuration: Integer = 1000; const ATags: String = '{\an7}');
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
@@ -356,7 +358,7 @@ type
     FCore: TMPVCore;
     FAspectRatio: TMPVPlayerVideoAspectRatio;
     FFontSize: Integer;
-    FLastFontSize: Integer;
+    FLastFontSize: Double;
     FLastMarginX: Integer;
     FLastMarginY: Integer;
     FSafeMarginPercent: Byte;
@@ -472,6 +474,9 @@ type
     {$IFDEF DARWIN}
     procedure CreateWnd; override;
     {$ENDIF}
+    {$IFDEF LCLGTK3}
+    procedure DestroyWnd; override;
+    {$ENDIF}
     procedure Resize; override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -576,6 +581,7 @@ type
 
     // OSD / SUBTITULOS
     procedure ShowOverlayText(const AText: String; const ATags: String = '{\an2}');
+    procedure InvalidateOverlayText;
     procedure ShowText(const AText: String; const ADuration: Integer = 1000; const ATags: String = '{\an7}');
     procedure SetTextColor(const AValue: String);
     procedure SetTextHAlign(const AValue: String);
@@ -755,6 +761,13 @@ end;
 
 // -----------------------------------------------------------------------------
 
+{$IFDEF LCLGTK3}
+// LazGdk3 does not import the X11 backend functions
+function gdk_x11_window_get_xid(window: PGdkWindow): PtrUInt; cdecl; external 'libgdk-3.so.0';
+{$ENDIF}
+
+// -----------------------------------------------------------------------------
+
 {$IFDEF ENABLE_EXT_EQUALIZER}
 const
   MPV_EQ_FREQUENCIES: array[0..9] of Integer =
@@ -879,7 +892,7 @@ begin
   {$IFDEF USETIMER}
   FTimer := TTimer.Create(NIL);
   FTimer.Enabled := False;
-  FTimer.Interval := 33; // 16 = 60fps (Máxima fluidez), 33 = 30fps (estándar), 50 = 20fps (Ahorro de Energía);
+  FTimer.Interval := 33; // 16 = 60fps (Máxima fluidez), 33 = 30fps (estándar), 50 = 20fps (Ahorro de Energía)
   FTimer.OnTimer := @DoTimer;
   FLastPos := -1;
   {$ENDIF}
@@ -1703,8 +1716,7 @@ begin
   // Step from GetMediaPosInMs (it knows a seek done while paused that
   // time-pos may not report yet) and move with SetMediaPosInMs, which keeps
   // FPausePosMs updated. Before, time-pos was set directly and FPausePosMs
-  // kept the old position, so GetMediaPosInMs (and the waveform cursor)
-  // didn't change.
+  // kept the old position, so GetMediaPosInMs didn't change.
 
   // Pause first, like mpv's frame-step does
   if not IsPaused then
@@ -1955,6 +1967,13 @@ begin
     mpv_command_([s, ID.ToString])
   else
     mpv_command_([s]);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.InvalidateOverlayText;
+begin
+  FOverlayValid := False;
 end;
 
 // -----------------------------------------------------------------------------
@@ -2769,6 +2788,23 @@ end;
 
 // -----------------------------------------------------------------------------
 
+{$IFDEF LCLGTK3}
+procedure TMPVPlayer.DestroyWnd;
+begin
+  // gtk3 destroys the panel's X window when LCL recreates the handle (e.g. when
+  // the panel is moved to another form), and mpv's embedded window with it;
+  // mpv then fails on XDestroyWindow (BadWindow) and Xlib ends the process.
+  // Stop mpv while its parent still exists; Play initializes it again with
+  // the new window.
+  if (FRenderMode = rmEmbedding) and FCore.Initialized then
+    Close;
+
+  inherited DestroyWnd;
+end;
+{$ENDIF}
+
+// -----------------------------------------------------------------------------
+
 function TMPVPlayer.GetWID: Int64;
 {$IFDEF LCLGTK2}
 var
@@ -2901,7 +2937,8 @@ var
   BlackBarX, BlackBarY: Double;
   TargetMarginXPx, TargetMarginYPx: Double;
   MarginMultiplier: Double;
-  NewFontSize, NewMarginX, NewMarginY: Int64;
+  NewFontSize: Double;
+  NewMarginX, NewMarginY: Int64;
 begin
   if Assigned(FCore) and FCore.Initialized then
   begin
@@ -2931,20 +2968,22 @@ begin
 
       NewMarginX := Round(TargetMarginXPx * (720.0 / ClientHeight));
       NewMarginY := Round(TargetMarginYPx * (720.0 / ClientHeight));
-      NewFontSize := Round(FFontSize * (EffectiveH / ClientHeight));
+      // decimals keep the scaling continuous; 0.1 steps avoid needless updates
+      NewFontSize := Round(FFontSize * (EffectiveH / ClientHeight) * 10) / 10;
 
-      if (NewFontSize <> FLastFontSize) or (NewMarginX <> FLastMarginX) or (NewMarginY <> FLastMarginY) then
+      if (Abs(NewFontSize - FLastFontSize) > 0.01) or (NewMarginX <> FLastMarginX) or (NewMarginY <> FLastMarginY) then
       begin
-        FCore.mpv_set_property_int64('osd-font-size', NewFontSize);
+        FCore.mpv_set_property_double('osd-font-size', NewFontSize);
         FCore.mpv_set_property_int64('osd-margin-x', NewMarginX);
         FCore.mpv_set_property_int64('osd-margin-y', NewMarginY);
-        FCore.mpv_set_property_int64('sub-font-size', NewFontSize);
+        FCore.mpv_set_property_double('sub-font-size', NewFontSize);
         FCore.mpv_set_property_int64('sub-margin-x', NewMarginX);
         FCore.mpv_set_property_int64('sub-margin-y', NewMarginY);
 
         FLastFontSize := NewFontSize;
         FLastMarginX := NewMarginX;
         FLastMarginY := NewMarginY;
+        FCore.InvalidateOverlayText;
       end;
     end;
   end;
@@ -3064,6 +3103,10 @@ begin
       UnInitializeRenderGL;
 
   FGL := TUWOpenGLControl.Create(Self);
+  {$IFDEF LCLGTK3}
+  // mpv needs no depth buffer, and with one GtkGLArea enables GL_DEPTH_TEST
+  FGL.DepthBits := 0;
+  {$ENDIF}
   FGL.Parent := Self;
   FGL.Align := alClient;
   FGL.OnClick := OnClick;
@@ -3113,8 +3156,13 @@ end;
 
 procedure TMPVPlayer.DoOnPaint(Sender: TObject);
 begin
+  {$IFDEF MPVGL_MAINTHREAD}
+  if Assigned(FRenderGL) then
+    FRenderGL.Paint;
+  {$ELSE}
   if Assigned(FRenderGL) and FCore.IsMediaLoaded and not FCore.IsPlaying then
     FRenderGL.Render(True);
+  {$ENDIF}
 end;
 
 // -----------------------------------------------------------------------------
@@ -3717,6 +3765,10 @@ end;
 procedure TMPVPlayer.Play(const AFileName: String; const AStartAtPositionMs: Integer = 0);
 begin
   if not FCore.Initialized then InitializePlayer;
+  {$IFDEF MPVGL_MAINTHREAD}
+  // vo=libmpv needs a render context when the file starts
+  if Assigned(FRenderGL) then FRenderGL.PrepareRender;
+  {$ENDIF}
   FCore.Play(AFileName, AStartAtPositionMs);
 end;
 
@@ -3746,6 +3798,13 @@ end;
 procedure TMPVPlayer.ShowOverlayText(const AText: String; const ATags: String = '{\an2}');
 begin
   FCore.ShowOverlayText(AText, ATags);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.InvalidateOverlayText;
+begin
+  FCore.InvalidateOverlayText;
 end;
 
 // -----------------------------------------------------------------------------
