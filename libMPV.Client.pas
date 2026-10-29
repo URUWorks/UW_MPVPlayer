@@ -458,7 +458,7 @@ type
    * @param data A valid pointer returned by the API, or NULL.
     }
 
-  mpv_free : procedure(var data:pointer);cdecl;
+  mpv_free : procedure(data:pointer);cdecl;
 
   {*
    * Return the name of this client handle. Every client has its own unique
