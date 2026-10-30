@@ -2357,7 +2357,7 @@ end;
 
 initialization
   {$IFDEF UNIX}
-  setlocale(1, 'C');
+  setlocale({$IFDEF DARWIN}4{$ELSE}1{$ENDIF}, 'C');
   {$ENDIF}
   hLibMPV := dynlibs.NilHandle;
   GLibMPVRefCount := 0;
