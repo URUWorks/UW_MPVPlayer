@@ -1,3 +1,9 @@
+2.4 (08/11/2026)
+
+* Added `DetectVideoCrop` to detect the black bars (letterbox/pillarbox) of the current frame, returning the crop in decoded video pixels (`cdOk`, `cdNoBars` or `cdNoImage`). Anamorphic videos are handled.
+* Added `SetVideoCrop`, `GetVideoCrop` and `IsVideoCropped` to crop the video with mpv's `video-crop` (falls back to a `crop` video filter on older mpv). The crop is kept when the same file is reloaded and removed when another one is opened.
+* `SetVideoFilters` now remembers the last filters set, so the crop fallback can rebuild the filter chain.
+
 2.3 (28/10/2026)
 
 * Fixed OpenGL rendering on GTK3 and Qt5/Qt6 by rendering on the main thread (`MPVGL_MAINTHREAD`); other platforms keep the render thread.
