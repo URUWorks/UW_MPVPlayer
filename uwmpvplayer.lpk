@@ -13,7 +13,7 @@
       </SearchPaths>
     </CompilerOptions>
     <Description Value="MPVPlayer for Lazarus"/>
-    <Version Major="2" Minor="3"/>
+    <Version Major="2" Minor="4"/>
     <Files>
       <Item>
         <Filename Value="MPVPlayer.pas"/>

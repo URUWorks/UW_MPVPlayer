@@ -48,6 +48,8 @@ type
   TMPVPlayerVideoAspectRatio = (arDefault, ar4_3, ar16_9, ar185_1, ar235_1);
   TMPVPlayerLogLevel = (llNo, llFatal, llError, llWarn, llInfo, llStatus, llV, llDebug, llTrace);
   TMPVPlayerScreenshotMode = (smSubtitles, smVideo, smWindow);
+  // result of DetectVideoCrop: crop found, no black bars, or a frame that can't be used
+  TMPVPlayerCropDetect = (cdOk, cdNoBars, cdNoImage);
 
   TMPVPlayerEventReceived = procedure(ASender: TObject; AEvent: Pmpv_event) of object;
   TMPVPlayerNotifyEvent = procedure(ASender: TObject; AParam: Integer) of object;
@@ -123,6 +125,9 @@ type
     {$IFDEF ENABLE_SMPTE}
     FSMPTEMode: Boolean;
     {$ENDIF}
+    FVideoFilters: TMPVPlayerVideoFilters; // the last ones set, to rebuild "vf"
+    FVideoCrop: TRect;                     // empty = no crop
+    FVideoCropVF: Boolean;                 // mpv < 0.38: no "video-crop", use vf=crop
     FStartAtPosMs: Integer;
     FPausePosMs: Integer;
     FFileName: String;
@@ -281,6 +286,11 @@ type
     function GetScreenshotToBitmap(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo): TBitmap;
     procedure ScreenshotToFile(const AFileName: String; const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
     procedure ScreenshotToClipboard(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
+
+    function DetectVideoCrop(out ARect: TRect; const AThreshold: Byte = 32): TMPVPlayerCropDetect;
+    procedure SetVideoCrop(const ARect: TRect);
+    procedure ApplyVideoCrop;
+    property VideoCrop: TRect read FVideoCrop;
 
     procedure AddOption(const AValue: String);
     procedure RemoveOption(const AValue: String);
@@ -562,6 +572,13 @@ type
     procedure ScreenshotToClipboard(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
 
     procedure SetVideoAspectRatio(const AValue: TMPVPlayerVideoAspectRatio);
+
+    // black bars (letterbox/pillarbox) of the current frame, in video pixels
+    function DetectVideoCrop(out ARect: TRect; const AThreshold: Byte = 32): TMPVPlayerCropDetect;
+    // an empty rect removes the crop. It's kept while the same file reloaded and removed when another one is opened
+    procedure SetVideoCrop(const ARect: TRect);
+    function GetVideoCrop: TRect;
+    function IsVideoCropped: Boolean;
 
     procedure SetVideoFilters(const AVideoFilters: TMPVPlayerVideoFilters);
     procedure ClearVideoFilters;
@@ -885,6 +902,9 @@ begin
   FPausePosMs := -1;
   FFileName := '';
   FMPVFileName := '';
+  FVideoFilters := [];
+  FVideoCrop := Rect(0, 0, 0, 0);
+  FVideoCropVF := False;
   FYTDLPFileName := '';
   FStartOptions := TStringList.Create;
   SetLength(FTrackList, 0);
@@ -1440,7 +1460,12 @@ begin
   if Initialize() then
   begin
     FStartAtPosMs := AStartAtPositionMs;
+    // the black bars of a video are not the ones of another
+    if AFileName <> FFileName then
+      FVideoCrop := Rect(0, 0, 0, 0);
     FFileName := AFileName;
+    // "video-crop" is an option, it stays from the previous file if not reset
+    ApplyVideoCrop;
     Loop(0, 0);
     FPausePosMs := -1;
     mpv_command_(['loadfile', FFileName]);
@@ -2289,6 +2314,174 @@ end;
 
 // -----------------------------------------------------------------------------
 
+// Looks for the black bars (letterbox and/or pillarbox) in the current frame.
+// The frame must have image: the first ones of a film are usually black.
+// The edges are scanned inward, a row/column is a bar while (almost) all its
+// pixels are black; burned-in text inside a bar stops the scan there, so it
+// may crop less but never cuts the image.
+function TMPVCore.DetectVideoCrop(out ARect: TRect; const AThreshold: Byte = 32): TMPVPlayerCropDetect;
+const
+  MaxLitPercent = 2; // % of non black pixels a bar can have (noise, logos)
+  MinBar        = 2; // smaller "bars" are ignored (pixels of the screenshot)
+var
+  Bmp: TBitmap;
+  Data: PByte;
+  BPL, sw, sh, vw, vh, rot: Integer;
+  t, b, l, r: Integer;
+  vl, vt, vr, vb: Integer;
+
+  function IsLit(const X, Y: Integer): Boolean; inline;
+  var
+    p: PByte;
+  begin
+    // 32 bit pixels, any channel order: the brightest channel decides
+    p := Data + (Y * BPL) + (X * 4);
+    Result := (p[0] > AThreshold) or (p[1] > AThreshold) or (p[2] > AThreshold);
+  end;
+
+  function RowIsBar(const Y, X0, X1: Integer): Boolean;
+  var
+    x, lit, n, step: Integer;
+  begin
+    step := Max(1, (X1 - X0 + 1) div 512);
+    lit := 0;
+    n := 0;
+    x := X0;
+    while x <= X1 do
+    begin
+      if IsLit(x, Y) then Inc(lit);
+      Inc(n);
+      Inc(x, step);
+    end;
+    Result := (lit * 100) <= (n * MaxLitPercent);
+  end;
+
+  function ColIsBar(const X, Y0, Y1: Integer): Boolean;
+  var
+    y, lit, n, step: Integer;
+  begin
+    step := Max(1, (Y1 - Y0 + 1) div 512);
+    lit := 0;
+    n := 0;
+    y := Y0;
+    while y <= Y1 do
+    begin
+      if IsLit(X, y) then Inc(lit);
+      Inc(n);
+      Inc(y, step);
+    end;
+    Result := (lit * 100) <= (n * MaxLitPercent);
+  end;
+
+begin
+  Result := cdNoImage;
+  ARect := Rect(0, 0, 0, 0);
+  if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
+
+  // the crop is in pixels of the decoded video (what "video-crop" and the
+  // crop filters of mpv/ffmpeg use)
+  vw := GetVideoWidth;
+  vh := GetVideoHeight;
+  if (vw <= 0) or (vh <= 0) then Exit;
+  // a rotated video would need to rotate the rect too: not supported
+  rot := mpv_get_property_int64('video-params/rotate');
+  if (rot mod 180) <> 0 then Exit;
+
+  // the video without subtitles/OSD (it's scaled to the display size, so
+  // anamorphic videos are converted below)
+  Bmp := GetScreenshotToBitmap(smVideo);
+  if Bmp = NIL then Exit;
+  try
+    sw := Bmp.Width;
+    sh := Bmp.Height;
+    if (sw < 16) or (sh < 16) or (Bmp.RawImage.Description.BitsPerPixel <> 32) then Exit;
+    Data := Bmp.RawImage.Data;
+    BPL  := Bmp.RawImage.Description.BytesPerLine;
+    if Data = NIL then Exit;
+
+    t := 0;
+    while (t < sh) and RowIsBar(t, 0, sw-1) do Inc(t);
+    if t >= sh then Exit; // all black
+    b := sh - 1;
+    while (b > t) and RowIsBar(b, 0, sw-1) do Dec(b);
+    // the columns only inside the rows with image
+    l := 0;
+    while (l < sw) and ColIsBar(l, t, b) do Inc(l);
+    if l >= sw then Exit;
+    r := sw - 1;
+    while (r > l) and ColIsBar(r, t, b) do Dec(r);
+
+    // the image left is too small: a dark frame, not bars
+    if ((r - l + 1) < (sw div 4)) or ((b - t + 1) < (sh div 4)) then Exit;
+
+    if t < MinBar then t := 0;
+    if l < MinBar then l := 0;
+    if (sh - 1 - b) < MinBar then b := sh - 1;
+    if (sw - 1 - r) < MinBar then r := sw - 1;
+
+    if (t = 0) and (l = 0) and (b = sh - 1) and (r = sw - 1) then
+    begin
+      ARect := Rect(0, 0, vw, vh);
+      Exit(cdNoBars);
+    end;
+
+    // to video pixels; the edges go to the image side so no black line is
+    // left, and even values (chroma subsampling)
+    vl := ((l * vw + sw - 1) div sw + 1) and not 1;
+    vt := ((t * vh + sh - 1) div sh + 1) and not 1;
+    vr := (((r + 1) * vw) div sw) and not 1;
+    vb := (((b + 1) * vh) div sh) and not 1;
+    if l = 0 then vl := 0;
+    if t = 0 then vt := 0;
+    if r = sw - 1 then vr := vw;
+    if b = sh - 1 then vb := vh;
+    if (vr - vl < 16) or (vb - vt < 16) then Exit;
+
+    ARect := Rect(vl, vt, vl + ((vr - vl) and not 1), vt + ((vb - vt) and not 1));
+    Result := cdOk;
+  finally
+    Bmp.Free;
+  end;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.SetVideoCrop(const ARect: TRect);
+begin
+  if ARect.IsEmpty then
+    FVideoCrop := Rect(0, 0, 0, 0)
+  else
+    FVideoCrop := ARect;
+
+  ApplyVideoCrop;
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVCore.ApplyVideoCrop;
+var
+  s: String;
+begin
+  if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
+
+  if FVideoCrop.IsEmpty then
+    s := '0x0+0+0' // no crop
+  else
+    s := Format('%dx%d+%d+%d', [FVideoCrop.Width, FVideoCrop.Height, FVideoCrop.Left, FVideoCrop.Top]);
+
+  if not FVideoCropVF then
+  begin
+    // mpv 0.38+: cropped in the renderer, the image is centered by mpv
+    if mpv_set_option_string_('video-crop=' + s) = MPV_ERROR_SUCCESS then Exit;
+    // older mpv: with a filter
+    FVideoCropVF := True;
+  end;
+
+  SetVideoFilters(FVideoFilters);
+end;
+
+// -----------------------------------------------------------------------------
+
 procedure TMPVCore.ScreenshotToClipboard(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
 var
   Bmp: TBitmap;
@@ -2335,6 +2528,7 @@ var
   vf: TMPVPlayerVideoFilter;
   fn, fp, s: String;
 begin
+  FVideoFilters := AVideoFilters;
   s := '';
   for vf in AVideoFilters do
   begin
@@ -2349,6 +2543,18 @@ begin
     if not fp.IsEmpty then
       s += '=' + fp;
   end;
+
+  // old mpv without "video-crop": the crop is the last filter
+  if FVideoCropVF and not FVideoCrop.IsEmpty then
+  begin
+    fp := Format('crop=w=%d:h=%d:x=%d:y=%d', [FVideoCrop.Width, FVideoCrop.Height,
+      FVideoCrop.Left, FVideoCrop.Top]);
+    if s.IsEmpty then
+      s := fp
+    else
+      s += ',' + fp;
+  end;
+
   mpv_set_option_string_('vf=' + s);
 end;
 
@@ -4196,6 +4402,34 @@ end;
 procedure TMPVPlayer.ScreenshotToClipboard(const AScreenshotMode: TMPVPlayerScreenshotMode = smVideo);
 begin
   FCore.ScreenshotToClipboard(AScreenshotMode);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.DetectVideoCrop(out ARect: TRect; const AThreshold: Byte = 32): TMPVPlayerCropDetect;
+begin
+  Result := FCore.DetectVideoCrop(ARect, AThreshold);
+end;
+
+// -----------------------------------------------------------------------------
+
+procedure TMPVPlayer.SetVideoCrop(const ARect: TRect);
+begin
+  FCore.SetVideoCrop(ARect);
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.GetVideoCrop: TRect;
+begin
+  Result := FCore.VideoCrop;
+end;
+
+// -----------------------------------------------------------------------------
+
+function TMPVPlayer.IsVideoCropped: Boolean;
+begin
+  Result := not FCore.VideoCrop.IsEmpty;
 end;
 
 // -----------------------------------------------------------------------------
