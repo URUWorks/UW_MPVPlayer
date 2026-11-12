@@ -1751,11 +1751,15 @@ begin
   end;
 
   // Work with frame numbers, adding rounded ms on every step drifts with
-  // non integer frame rates (23.976...). Ceil, so the exact seek lands
-  // inside the frame and not some microseconds before it (previous frame).
+  // non integer frame rates (23.976...).
   Frame  := Round(GetMediaPosInMs * AFPS / 1000) + AFrames;
   if Frame < 0 then Frame := 0;
-  NewPos := Ceil(Frame * 1000 / AFPS);
+  // A quarter of frame inside it. With Ceil the seek was less than 1 ms after
+  // the theoretical frame start, and the timestamps in the file are rounded
+  // (container time base) or a bit later: some steps landed on the previous
+  // frame, so the preview repeated a frame and the next step jumped two.
+  // A quarter still rounds to the same frame above.
+  NewPos := Round((Frame + 0.25) * 1000 / AFPS);
   Len := GetMediaLenInMs;
   if NewPos < 0 then NewPos := 0;
   if (Len > 0) and (NewPos > Len) then NewPos := Len;
