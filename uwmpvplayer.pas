@@ -8,7 +8,7 @@ unit UWMPVPlayer;
 interface
 
 uses
-  MPVPlayer, LazarusPackageIntf;
+  MPVPlayer, MPVPlayer.SceneDetect, LazarusPackageIntf;
 
 implementation
 

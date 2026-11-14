@@ -1310,8 +1310,9 @@ begin
   end
   else
   begin
+    p := 0; // False if it fails: mpv doesn't write the value then
     FError := mpv_get_property(FMPV_HANDLE^, PChar(APropertyName), MPV_FORMAT_FLAG, @p);
-    Result := Boolean(p);
+    Result := p <> 0;
   end;
 end;
 
@@ -1338,6 +1339,8 @@ end;
 
 function TMPVCore.mpv_get_property_double(const APropertyName: String; const reply_userdata: Integer = 0): Double;
 begin
+  // 0 if it fails: mpv doesn't write the value then
+  Result := 0;
   if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
@@ -1366,6 +1369,8 @@ end;
 
 function TMPVCore.mpv_get_property_int64(const APropertyName: String; const reply_userdata: Integer = 0): Int64;
 begin
+  // 0 if it fails: mpv doesn't write the value then
+  Result := 0;
   if FInitialized and (FMPV_HANDLE <> NIL) then
   begin
     if reply_userdata > 0 then
