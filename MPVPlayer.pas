@@ -1737,10 +1737,12 @@ procedure TMPVCore.StepFrames(const AFrames: Integer; const AFPS: Double);
 var
   NewPos, Len: Integer;
   Frame: Int64;
+  Target: Double;
+  s: String;
 begin
   // Step from GetMediaPosInMs (it knows a seek done while paused that
-  // time-pos may not report yet) and move with SetMediaPosInMs, which keeps
-  // FPausePosMs updated. Before, time-pos was set directly and FPausePosMs
+  // time-pos may not report yet) and keep FPausePosMs updated with the new
+  // position. Before, time-pos was set directly and FPausePosMs
   // kept the old position, so GetMediaPosInMs didn't change.
 
   // Pause first, like mpv's frame-step does
@@ -1754,16 +1756,30 @@ begin
   // non integer frame rates (23.976...).
   Frame  := Round(GetMediaPosInMs * AFPS / 1000) + AFrames;
   if Frame < 0 then Frame := 0;
-  // A quarter of frame inside it. With Ceil the seek was less than 1 ms after
-  // the theoretical frame start, and the timestamps in the file are rounded
-  // (container time base) or a bit later: some steps landed on the previous
-  // frame, so the preview repeated a frame and the next step jumped two.
-  // A quarter still rounds to the same frame above.
+  // The position reported to the app (FPausePosMs) is a quarter of frame
+  // inside it, so it truncates and rounds to the same frame.
   NewPos := Round((Frame + 0.25) * 1000 / AFPS);
   Len := GetMediaLenInMs;
   if NewPos < 0 then NewPos := 0;
   if (Len > 0) and (NewPos > Len) then NewPos := Len;
-  SetMediaPosInMs(NewPos);
+  if IsPaused and (NewPos <= Len) then
+    FPausePosMs := NewPos;
+
+  // But mpv must be sent the start of the frame: with hr-seek mpv skips every
+  // frame whose pts is lower than target - 5 ms and shows the next one. A
+  // target a quarter of frame inside (10 ms at 23.976) skipped the wanted
+  // frame and showed the next one, so the video was one frame ahead of the
+  // time shown, the subtitles and the shot changes. The 5 ms tolerance of
+  // mpv already covers timestamps rounded by the container time base.
+  Target := Frame / AFPS;
+  {$IFDEF ENABLE_SMPTE}
+  if FSMPTEMode then
+    Target := Target * 1.001;
+  {$ENDIF}
+  if (Len > 0) and (Target * 1000 > Len) then
+    Target := NewPos / 1000.0;
+  s := FloatToStr(Target, FFormatSettings);
+  mpv_command_(['seek', s, 'absolute+exact']);
 end;
 
 // -----------------------------------------------------------------------------
