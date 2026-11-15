@@ -2259,8 +2259,10 @@ var
   pVals: Pmpv_node;
   Key: String;
   DestStride: Integer;
+  CopyOk: Boolean;
 begin
   Result := NIL;
+  CopyOk := False;
   if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
 
   case AScreenshotMode of
@@ -2331,7 +2333,16 @@ begin
             DestPtr := Result.RawImage.Data;
             DestStride := Result.RawImage.Description.BytesPerLine;
 
-            if (stride = w * 4) and (DestStride = w * 4) then
+            // never write past the bitmap: a raw image that is not 32-bit
+            // (or smaller than expected) overflowed the heap, and the access
+            // violation came later, anywhere
+            CopyOk := (DestPtr <> NIL) and (Result.RawImage.Description.BitsPerPixel = 32) and
+              (DestStride >= w * 4) and (stride >= w * 4) and
+              (Result.RawImage.DataSize >= PtrUInt(DestStride) * PtrUInt(h));
+
+            if not CopyOk then
+              // nothing copied
+            else if (stride = w * 4) and (DestStride = w * 4) then
             begin
               Move(SrcPtr^, DestPtr^, w * 4 * h);
             end
@@ -2347,6 +2358,9 @@ begin
           finally
             Result.EndUpdate(False);
           end;
+
+          if not CopyOk then
+            FreeAndNil(Result);
         end;
       end;
     finally
