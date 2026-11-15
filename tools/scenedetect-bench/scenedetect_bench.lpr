@@ -153,13 +153,14 @@ begin
     for i := 1 to sl.Count-1 do
     begin
       p.DelimitedText := sl[i];
-      if p.Count < 6 then Exit;
+      if p.Count < 7 then Exit; // an older cache, without Coverage: read again
       V.Frames[i-1].Time      := StrToFloat(p[0], FS);
       V.Frames[i-1].Score     := StrToFloat(p[1], FS);
       V.Frames[i-1].Gradual   := StrToFloat(p[2], FS);
       V.Frames[i-1].Linearity := StrToFloat(p[3], FS);
       V.Frames[i-1].Luma      := StrToFloat(p[4], FS);
       V.Frames[i-1].Contrast  := StrToFloat(p[5], FS);
+      V.Frames[i-1].Coverage  := StrToFloat(p[6], FS);
     end;
     Result := True;
   finally
@@ -182,7 +183,8 @@ begin
       with V.Frames[i] do
         sl.Add(FormatFloat('0.000000', Time, FS) + ' ' + FormatFloat('0.000', Score, FS) + ' ' +
           FormatFloat('0.000', Gradual, FS) + ' ' + FormatFloat('0.000', Linearity, FS) + ' ' +
-          FormatFloat('0.000', Luma, FS) + ' ' + FormatFloat('0.000', Contrast, FS));
+          FormatFloat('0.000', Luma, FS) + ' ' + FormatFloat('0.000', Contrast, FS) + ' ' +
+          FormatFloat('0.000', Coverage, FS));
     sl.SaveToFile(AFileName);
   finally
     sl.Free;
