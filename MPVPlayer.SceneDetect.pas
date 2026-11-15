@@ -57,8 +57,9 @@ unit MPVPlayer.SceneDetect;
 // second), G(k) = D(F(k-s), F(k+s)) (blocks moved up to 1 pixel) and the linearity L(k) = mean of
 // |2F(k) - F(k-s) - F(k+s)| / 2. In a dissolve or a fade each frame is a mix
 // of the frames before and after, so L is small against G, while motion
-// gives a big L. A dissolve is the frame where G is the highest within +/- s,
-// at least GradualMinScore and with L <= 0.3 G, away from the hard cuts.
+// gives a big L. A dissolve is around the frame where G is the highest within
+// +/- s, at least GradualMinScore and with L <= 0.3 G, away from the hard
+// cuts; the change is put at its end, the first frame of the new shot alone.
 // A fade goes through flat frames (black, white or a single colour): a run of
 // them entered and left gradually is one change, in its middle. Fades in at
 // the start and out at the end of the video are not changes.
@@ -112,6 +113,7 @@ type
     FWindow     : Double;
     FGradual    : Boolean;
     FGradualMin : Double;
+    FCrop       : TRect;
     FWidth      : Integer;
     FHeight     : Integer;
     FHWDec      : String;
@@ -165,9 +167,9 @@ type
     property Status     : TMPVSceneDetectStatus read GetStatus;
     property ErrorText  : String                read GetErrorText;
     property FrameCount : Integer               read GetFrameCount;
-    // minimum score (mean difference per pixel) for a cut, 8 by default
+    // minimum score (mean difference per pixel) for a cut, 6 by default
     property MinScore   : Double  read FMinScore write FMinScore;
-    // how many times the score must be over the next one in the window, 3 by default
+    // how many times the score must be over the next one in the window, 2 by default
     property Ratio      : Double  read FRatio    write FRatio;
     // half the window in seconds, 0.25 by default
     property Window     : Double  read FWindow   write FWindow;
@@ -175,6 +177,10 @@ type
     property Gradual    : Boolean read FGradual  write FGradual;
     // minimum G for a dissolve, 25 by default
     property GradualMinScore: Double read FGradualMin write FGradualMin;
+    // the part of the video to analyse, in decoded video pixels (e.g. the
+    // player's GetVideoCrop or DetectVideoCrop, without the black bars:
+    // subtitles burnt into them aren't taken as changes). Empty = all
+    property Crop       : TRect   read FCrop     write FCrop;
     // size of the analysed image, 48x27 by default (at least 40x8)
     property Width      : Integer read FWidth    write FWidth;
     property Height     : Integer read FHeight   write FHeight;
@@ -198,6 +204,8 @@ const
   MaxSpan     = 24;
   LinearRatio = 0.3; // L <= this * G in a dissolve
   FadeSpan    = 1.0; // seconds around a fade without dissolves
+  MaxFade     = 4.0; // seconds of a fade at most (out, flat and in)
+  PictureContrast = 12; // luma deviation of a frame with a picture, not dim
 
 type
 
@@ -233,6 +241,7 @@ type
     FWindow     : Double;
     FGradual    : Boolean;
     FGradualMin : Double;
+    FCrop       : TRect;
     FWidth      : Integer;
     FHeight     : Integer;
     FHWDec      : String;
@@ -467,6 +476,7 @@ begin
   FWindow     := AOwner.FWindow;
   FGradual    := AOwner.FGradual;
   FGradualMin := AOwner.FGradualMin;
+  FCrop       := AOwner.FCrop;
   FWidth      := AOwner.FWidth;
   FHeight     := AOwner.FHeight;
   FHWDec      := AOwner.FHWDec;
@@ -523,6 +533,7 @@ function TMPVSceneDetectThread.Setup(out AError: String): Boolean;
 
 var
   params: array[0..1] of mpv_render_param;
+  cropF : String;
 begin
   Result := False;
   AError := '';
@@ -580,9 +591,14 @@ begin
   // frame's own time (us) and number in binary, a pixel per bit: time-pos
   // can't be used, mpv already has the next frame queued when this one is
   // rendered, so it's often one or two frames ahead
-  Opt('vf', Format('lavfi=[scale=%d:%d:flags=area,setsar=1,format=gbrp,split[img][r];' +
+  // (without the black bars first, if there's a crop)
+  if FCrop.IsEmpty then
+    cropF := ''
+  else
+    cropF := Format('crop=%d:%d:%d:%d,', [FCrop.Width, FCrop.Height, FCrop.Left, FCrop.Top]);
+  Opt('vf', Format('lavfi=[%sscale=%d:%d:flags=area,setsar=1,format=gbrp,split[img][r];' +
     '[r]crop=%d:2:0:0,geq=r=''%s'':g=''%s'':b=''%s''[rows];[img][rows]vstack]',
-    [FWidth, FHeight, FWidth, Rows, Rows, Rows]));
+    [cropF, FWidth, FHeight, FWidth, Rows, Rows, Rows]));
 
   if mpv_initialize(FHandle^) < 0 then
   begin
@@ -915,11 +931,12 @@ begin
   FSpan        := 0;
   FFrameCount  := 0;
   FLibFileName := ALibFileName;
-  FMinScore    := 8;
-  FRatio       := 3;
+  FMinScore    := 6;
+  FRatio       := 2;
   FWindow      := 0.25;
   FGradual     := True;
   FGradualMin  := 25;
+  FCrop        := Rect(0, 0, 0, 0);
   FWidth       := 48;
   FHeight      := 27;
   FHWDec       := 'no';
@@ -1348,13 +1365,13 @@ end;
 class function TMPVSceneDetector.FindGradual(const AFrames: TMPVSceneFrames; const ASpan: Integer;
   const AHardCuts: TDoubleDynArray; const AGradualMin: Double): TDoubleDynArray;
 var
-  n, i, j, k, q, c, nb: Integer;
+  n, i, j, k, q, c, nb, a, b: Integer;
   fd: Double;
   dt: TDoubleDynArray;
   flat: array of Boolean;
   blocked: array of record a, b: Double; end;
   cand: array of Integer;
-  ok, cutIn, cutOut: Boolean;
+  ok: Boolean;
 
   // a hard cut within ASpan seconds of ATime
   function NearHard(const ATime, ASpanTime: Double): Boolean;
@@ -1377,6 +1394,54 @@ var
     SetLength(blocked, Length(blocked)+1);
     blocked[High(blocked)].a := A;
     blocked[High(blocked)].b := B;
+  end;
+
+  // a fade out (or in) of a picture between frames A and B: a frame where
+  // G is high and the frame is the mix of the ones around it
+  function Ramp(A, B: Integer): Boolean;
+  var
+    m: Integer;
+  begin
+    Result := False;
+    A := Max(A, 0);
+    B := Min(B, n-1);
+    for m := A to B do
+      with AFrames[m] do
+        if (Gradual >= AGradualMin) and (Linearity <= LinearRatio * Gradual) then
+          Exit(True);
+  end;
+
+  // the end of the dissolve around frame K (the first frame of the new shot
+  // alone): G is at half its peak at the start and the end of a dissolve
+  // longer than 2 spans; a shorter one gives a peak about 2 spans wide, its
+  // end is about half a span after the middle
+  function DissolveEnd(const K: Integer): Integer;
+  var
+    l, r: Integer;
+  begin
+    l := K;
+    while (l > 0) and (K - l < 3 * MaxSpan) and (AFrames[l-1].Gradual >= AFrames[K].Gradual / 2) do Dec(l);
+    r := K;
+    while (r < n-1) and (r - K < 3 * MaxSpan) and (AFrames[r+1].Gradual >= AFrames[K].Gradual / 2) do Inc(r);
+    if r - l > 2 * ASpan + 2 then
+      Result := r
+    else
+      Result := Max(K, r - 2);
+  end;
+
+  // the frame at ATime (the first one after it)
+  function FrameAt(const ATime: Double): Integer;
+  var
+    lo, hi, m: Integer;
+  begin
+    lo := 0;
+    hi := n-1;
+    while lo < hi do
+    begin
+      m := (lo + hi) div 2;
+      if AFrames[m].Time < ATime then lo := m + 1 else hi := m;
+    end;
+    Result := lo;
   end;
 
   procedure Add(const ATime: Double);
@@ -1405,29 +1470,44 @@ begin
     with AFrames[i] do
       flat[i] := (Contrast < 3) or (((Luma < 8) or (Luma > 247)) and (Contrast < 6));
 
-  // the runs of flat frames: fades
+  // fades: a run of dim frames (without much contrast) with flat ones in it,
+  // between frames with a picture, reached and left gradually (a fade out
+  // and a fade in). A dark scene that comes near black now and then is not
+  // a fade: it doesn't fade from and to a picture, or it's longer than
+  // MaxFade, or it has cuts in it
   blocked := NIL;
   i := 0;
   while i < n do
   begin
-    if not flat[i] then
+    if AFrames[i].Contrast >= PictureContrast then
     begin
       Inc(i);
       Continue;
     end;
     j := i;
-    while (j+1 < n) and flat[j+1] do Inc(j);
-    // a fade in at the start or out at the end is not a change
-    if i = 0 then Block(AFrames[0].Time, AFrames[j].Time + FadeSpan);
-    if j = n-1 then Block(AFrames[i].Time - FadeSpan, AFrames[n-1].Time);
-    // entered and left with a cut, or gradually
-    cutIn  := (i = 0) or NearHard(AFrames[i].Time, 2.5 * fd);
-    cutOut := (j = n-1) or NearHard(AFrames[j+1].Time, 2.5 * fd);
-    if not cutIn and not cutOut then
+    while (j+1 < n) and (AFrames[j+1].Contrast < PictureContrast) do Inc(j);
+    // the flat frames in the run
+    a := -1;
+    b := -1;
+    for k := i to j do
+      if flat[k] then
+      begin
+        if a < 0 then a := k;
+        b := k;
+      end;
+    if a >= 0 then
     begin
-      // out, flat, in: a single change, in the middle
-      Add(AFrames[(i + j + 1) div 2].Time);
-      Block(AFrames[i].Time - FadeSpan, AFrames[j].Time + FadeSpan);
+      // a fade in at the start or out at the end is not a change
+      if i = 0 then Block(AFrames[0].Time, AFrames[j].Time + FadeSpan)
+      else if j = n-1 then Block(AFrames[i].Time - FadeSpan, AFrames[n-1].Time)
+      else if (AFrames[j+1].Time - AFrames[i].Time <= MaxFade) and
+        not NearHard((AFrames[i].Time + AFrames[j+1].Time) / 2, (AFrames[j+1].Time - AFrames[i].Time) / 2 + 2.5 * fd) and
+        Ramp(FrameAt(AFrames[a].Time - FadeSpan) - ASpan, a) and Ramp(b, FrameAt(AFrames[b].Time + FadeSpan) + ASpan) then
+      begin
+        // out, flat, in: a single change, in the middle of the flat frames
+        Add(AFrames[(a + b + 1) div 2].Time);
+        Block(AFrames[i].Time - FadeSpan, AFrames[j].Time + FadeSpan);
+      end;
     end;
     i := j + 1;
   end;
@@ -1487,7 +1567,7 @@ begin
     end;
   end;
   for i := 0 to c-1 do
-    Add(AFrames[cand[i]].Time);
+    Add(AFrames[DissolveEnd(cand[i])].Time);
 
   if Length(Result) > 1 then
     SortDoubles(Result, 0, High(Result));
