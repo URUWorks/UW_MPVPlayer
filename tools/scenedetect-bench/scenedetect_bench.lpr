@@ -56,8 +56,8 @@ type
 var
   Videos     : array of TVideo;
   Tolerance  : Integer = 1;
-  MinScore   : Double = 8;
-  Ratio      : Double = 3;
+  MinScore   : Double = 6;
+  Ratio      : Double = 2;
   Window     : Double = 0.25;
   Gradual    : Boolean = True;
   GradualMin : Double = 25;
