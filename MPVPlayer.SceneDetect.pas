@@ -51,7 +51,13 @@ unit MPVPlayer.SceneDetect;
 // peak in the window (a frame Ratio times over both of its neighbours, e.g.
 // another cut two frames later) is not counted as the background (several
 // are: an animation changing every 2 frames), and of two cuts closer than
-// Window only the stronger is kept.
+// Window only the stronger is kept. Unless the frame changes only a part of
+// the picture (Coverage, the blocks that changed, under 95%): that is how
+// an animation drawn on twos, threes or fours moves, a big jump of the
+// characters over a background that stays, and when another jump like it is
+// within the window it is the background too. A change of the whole picture
+// of at least 6 times MinScore needs only half the Ratio (1.5 for 2): a cut in
+// the middle of fast action.
 //
 // Gradual transitions (Gradual = True). With s frames (about a third of a
 // second), G(k) = D(F(k-s), F(k+s)) (blocks moved up to 1 pixel) and the linearity L(k) = mean of
@@ -90,6 +96,7 @@ type
     Linearity : Single;   // L
     Luma      : Single;   // mean luma, 0..255
     Contrast  : Single;   // standard deviation of the luma
+    Coverage  : Single;   // the part of the picture changed at the hard cut score, 0..1
   end;
   TMPVSceneFrames = array of TMPVSceneFrame;
 
@@ -157,6 +164,8 @@ type
     function Recalculate(const AMinScore, ARatio: Double): Boolean;
     // the decision itself: the hard cuts from the times and scores of each frame
     class function FindCuts(const ATimes, AScores: array of Double; const AMinScore, ARatio, AWindow: Double): TDoubleDynArray; overload;
+    // the same with the Coverage of each frame (empty: all full changes)
+    class function FindCuts(const ATimes, AScores, ACoverage: array of Double; const AMinScore, ARatio, AWindow: Double): TDoubleDynArray; overload;
     // hard cuts and, with AGradual, dissolves and fades, sorted
     class function FindCuts(const AFrames: TMPVSceneFrames; const ASpan: Integer; const AMinScore, ARatio, AWindow: Double;
       const AGradual: Boolean; const AGradualMin: Double): TDoubleDynArray; overload;
@@ -206,6 +215,10 @@ const
   FadeSpan    = 1.0; // seconds around a fade without dissolves
   MaxFade     = 4.0; // seconds of a fade at most (out, flat and in)
   PictureContrast = 12; // luma deviation of a frame with a picture, not dim
+  ChangedBlock = 8;     // difference of a block that changed
+  FlatBlock    = 3;     // luma deviation of a block without detail (black bars, a plain background)
+  FullChange   = 0.9;   // Coverage of a cut that can't be an animation jump
+  StrongScore  = 6;     // times MinScore: a cut of the whole picture that needs only half the Ratio over the window
 
 type
 
@@ -226,7 +239,7 @@ type
     function BlockLuma(const A, B: array of SmallInt; const ABlock, dx, dy: Integer): Integer;
   public
     constructor Create(const AWidth, AHeight: Integer);
-    function Diff(const A, B: TPlanes; const AShift: Integer): Double;
+    function Diff(const A, B: TPlanes; const AShift: Integer; const ACoverage: PDouble = NIL): Double;
     function Linearity(const A, C, B: TPlanes): Double;
   end;
 
@@ -378,13 +391,37 @@ end;
 // the mean of |dY| + |dCb| + |dCr| by blocks, each block at the shift of B
 // (up to AShift pixels) where its luma matches best: a coarse search every 2
 // pixels and then the 8 around the best one
-function TFrameDiff.Diff(const A, B: TPlanes; const AShift: Integer): Double;
+function TFrameDiff.Diff(const A, B: TPlanes; const AShift: Integer; const ACoverage: PDouble = NIL): Double;
 var
   dx, dy, bx, by, cx, cy, x, y, i, k, blk, nb, sum, best, step: Integer;
+  changed, detailed: Integer;
   xi: array of Integer;
+
+  // a block with detail in A or B (not a black bar or a plain area in both)
+  function HasDetail(const ABlock: Integer): Boolean;
+  var
+    p, q: Integer;
+    sa, sa2, sb, sb2, c: Double;
+  begin
+    sa := 0; sa2 := 0; sb := 0; sb2 := 0;
+    with FRect[ABlock] do
+      for q := Y0 to Y1 do
+        for p := X0 to X1 do
+        begin
+          sa  := sa  + A[0][q*FW + p];
+          sa2 := sa2 + Sqr(Double(A[0][q*FW + p]));
+          sb  := sb  + B[0][q*FW + p];
+          sb2 := sb2 + Sqr(Double(B[0][q*FW + p]));
+        end;
+    c := FBlockCount[ABlock];
+    Result := (sa2 / c - Sqr(sa / c) >= Sqr(FlatBlock)) or (sb2 / c - Sqr(sb / c) >= Sqr(FlatBlock));
+  end;
+
 begin
   nb := FBX * FBY;
   Result := 0;
+  changed  := 0;
+  detailed := 0;
   step := Max(1, AShift - 1);
   for blk := 0 to nb-1 do
   begin
@@ -438,8 +475,18 @@ begin
             Abs(A[2][i+x] - B[2][k + xi[x]]));
       end;
     Result := Result + sum / FBlockCount[blk];
+    if Assigned(ACoverage) and HasDetail(blk) then
+    begin
+      Inc(detailed);
+      if sum / FBlockCount[blk] > ChangedBlock then Inc(changed);
+    end;
   end;
   Result := Result / nb;
+  if Assigned(ACoverage) then
+    if detailed > 0 then
+      ACoverage^ := changed / detailed
+    else
+      ACoverage^ := 0;
 end;
 
 // -----------------------------------------------------------------------------
@@ -703,23 +750,33 @@ var
   procedure Emit(const k, ALast: Integer);
   var
     f: TMPVSceneFrame;
-    a, bb: Integer;
-    m: Double;
+    a, bb, ma, mb: Integer;
+    m, cov: Double;
   begin
     f.Time     := times[Slot(k)];
     f.Luma     := lumas[Slot(k)];
     f.Contrast := contrasts[Slot(k)];
     // the smallest difference between the frames before k and from k on
-    m := 0;
+    m   := 0;
+    cov := 0;
     if k > 0 then
     begin
-      m := MaxDouble;
+      m  := MaxDouble;
+      ma := k-1;
+      mb := k;
       for a := Max(0, k-1-FlashFrames) to k-1 do
         for bb := k to Min(k+FlashFrames, ALast) do
           if diffs[Slot(a)][bb-a] < m then
-            m := diffs[Slot(a)][bb-a];
+          begin
+            m  := diffs[Slot(a)][bb-a];
+            ma := a;
+            mb := bb;
+          end;
+      // how much of the picture that pair changes
+      fd.Diff(planes[Slot(ma)], planes[Slot(mb)], MaxShift, @cov);
     end;
-    f.Score := m;
+    f.Score    := m;
+    f.Coverage := cov;
     if (k - span >= 0) and (k + span <= ALast) then
     begin
       f.Gradual   := fd.Diff(planes[Slot(k-span)], planes[Slot(k+span)], 1);
@@ -1244,9 +1301,17 @@ end;
 
 class function TMPVSceneDetector.FindCuts(const ATimes, AScores: array of Double;
   const AMinScore, ARatio, AWindow: Double): TDoubleDynArray;
+begin
+  Result := FindCuts(ATimes, AScores, [], AMinScore, ARatio, AWindow);
+end;
+
+// -----------------------------------------------------------------------------
+
+class function TMPVSceneDetector.FindCuts(const ATimes, AScores, ACoverage: array of Double;
+  const AMinScore, ARatio, AWindow: Double): TDoubleDynArray;
 var
   i, j, lo, hi, n, c, pk: Integer;
-  s, other, nb: Double;
+  s, other, nb, r: Double;
   peak: array of Boolean;
   strength: TDoubleDynArray;
 begin
@@ -1283,7 +1348,9 @@ begin
 
     // the background: the highest of the window. A single other peak
     // there (another cut a few frames away) doesn't count, but several
-    // are a pattern (a zoom or an animation changing every 2 frames)
+    // are a pattern (a zoom or an animation changing every 2 frames), and
+    // so is one when this frame changes only a part of the picture (a jump
+    // of an animation, the next one some frames later)
     other := 0;
     nb    := 0;
     pk    := 0;
@@ -1296,10 +1363,16 @@ begin
         end
         else if AScores[j] > other then
           other := AScores[j];
-    if (pk > 1) and (nb > other) then
+    if ((pk > 1) or ((pk = 1) and (i < Length(ACoverage)) and (ACoverage[i] < FullChange))) and (nb > other) then
       other := nb;
 
-    if s < ARatio * other then Continue;
+    // a strong change of the whole picture needs less over the background
+    // (a cut in the middle of fast action)
+    if (s >= StrongScore * AMinScore) and (i < Length(ACoverage)) and (ACoverage[i] >= FullChange) then
+      r := 1 + (ARatio - 1) / 2
+    else
+      r := ARatio;
+    if s < r * other then Continue;
 
     // too close to the previous cut: only the stronger one
     if (c > 0) and (ATimes[i] - Result[c-1] < AWindow) then
@@ -1324,19 +1397,22 @@ end;
 class function TMPVSceneDetector.FindCuts(const AFrames: TMPVSceneFrames; const ASpan: Integer;
   const AMinScore, ARatio, AWindow: Double; const AGradual: Boolean; const AGradualMin: Double): TDoubleDynArray;
 var
-  t, sc, g: TDoubleDynArray;
+  t, sc, cv, g: TDoubleDynArray;
   i, a, b, c: Integer;
 begin
   t  := NIL;
   sc := NIL;
+  cv := NIL;
   SetLength(t, Length(AFrames));
   SetLength(sc, Length(AFrames));
+  SetLength(cv, Length(AFrames));
   for i := 0 to High(AFrames) do
   begin
     t[i]  := AFrames[i].Time;
     sc[i] := AFrames[i].Score;
+    cv[i] := AFrames[i].Coverage;
   end;
-  Result := FindCuts(t, sc, AMinScore, ARatio, AWindow);
+  Result := FindCuts(t, sc, cv, AMinScore, ARatio, AWindow);
   if not AGradual or (ASpan <= 0) then Exit;
 
   g := FindGradual(AFrames, ASpan, Result, AGradualMin);
