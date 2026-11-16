@@ -36,7 +36,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          sudo bash -c 'apt-get update; apt-get install -y lazarus' >/dev/null
+          sudo bash -c 'apt-get update; apt-get install -y lazarus libgl-dev' >/dev/null
           declare -rx INSTANTFPCOPTIONS='-Fu/usr/lib/lazarus/*/components/lazutils'
           instantfpc '.github/workflows/make.pas' build
 
