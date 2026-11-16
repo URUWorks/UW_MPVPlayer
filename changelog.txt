@@ -7,6 +7,8 @@
 * `TMPVSceneDetector` keeps what it measured of every frame (`GetFrames`, `GetScores`, `HasScores`): `Recalculate` decides the cuts again with another `MinScore`/`Ratio` (and `Gradual`) at once, without reading the video again.
 * Added `tools/scenedetect-bench`, a console tool that measures the detector against videos with known cuts and transitions (hits, false and missed cuts, F1) and sweeps `MinScore` x `Ratio` from the same measures.
 * Fixed `mpv_get_property_double`, `mpv_get_property_int64` and `mpv_get_property_boolean` returning garbage when the property can't be read: now 0 / False (check `Error`).
+* Fixed `GetScreenshotToBitmap` writing past the bitmap when the raw image wasn't 32-bit or was smaller than expected (heap corruption and a later access violation); now it returns NIL.
+* Fixed a seek to a time inside a frame (double click on the timeline, a time not aligned to frames) showing the next frame: the seek goes to the start of the frame.
 
 2.4 (08/11/2026)
 
