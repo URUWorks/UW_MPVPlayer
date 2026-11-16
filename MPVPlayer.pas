@@ -31,6 +31,7 @@ uses
   LResources, LazarusPackageIntf, libMPV.Client,
   MPVPlayer.RenderGL, OpenGLContext, MPVPlayer.Filters
   {$IFDEF DARWIN}, dynlibs, CocoaAll{$ENDIF}
+  {$IFDEF LCLCocoa}, CocoaPrivate{$ENDIF}
   {$IFDEF LCLGTK2}, gtk2, gdk2x{$ENDIF}
   {$IFDEF LCLGTK3}, gtk3widgets, LazGtk3, LazGdk3{$ENDIF}
   {$IFDEF LCLQt5}, qt5, qtwidgets{$ENDIF}
@@ -248,7 +249,6 @@ type
     function GetMediaLenInSecs: Double;
     function GetMediaLenInFrames: Int64;
     procedure StepFrames(const AFrames: Integer; const AFPS: Double);
-    function GetSeekFPS: Double;
     procedure NextFrame(const AStep: Integer = 1);
     procedure PreviousFrame(const AStep: Integer = 1);
     procedure SetPlaybackRate(const AValue: Byte);
@@ -1634,7 +1634,7 @@ end;
 
 procedure TMPVCore.SetMediaPosInMs(const AValue: Integer);
 var
-  i, f, t, len: Double;
+  i: Double;
   s: String;
 begin
   if IsPaused and (AValue <= GetMediaLenInMs) then
@@ -1646,41 +1646,8 @@ begin
     i := i * 1.001;
   {$ENDIF}
 
-  // Send mpv the start of the frame the app means by this time. The app
-  // rounds a time to the nearest frame (timecodes, cursor, StepFrames), but
-  // an exact seek in mpv skips every frame whose pts is lower than
-  // target - 5 ms and shows the next one. So a time more than 5 ms inside a
-  // frame showed the following frame while the time shown was still the
-  // previous one: a double click on the timeline (cursor + a quarter of frame)
-  // always went one frame ahead of what the mouse wheel (StepFrames) showed,
-  // and a single click on the time ruler or an entry time not aligned to
-  // frames did the same some times. FPausePosMs keeps the value of the app.
-  f := GetSeekFPS;
-  if (f > 0) and (i > 0) then
-  begin
-    t := Round(i * f) / f;
-    len := GetMediaLenInSecs;
-    if (len <= 0) or (t <= len) then
-      i := t;
-  end;
-
   s := FloatToStr(i, FFormatSettings);
   mpv_command_(['seek', PChar(s), 'absolute+exact']);
-end;
-
-// -----------------------------------------------------------------------------
-
-function TMPVCore.GetSeekFPS: Double;
-const
-  EPSILON = 0.1;
-begin
-  // Like GetVideoFPS, but 0 when there is no video (audio files) instead of
-  // a default frame rate, so the seek isn't moved to a frame grid
-  Result := mpv_get_property_double('container-fps');
-  if (Result < EPSILON) then
-    Result := mpv_get_property_double('estimated-vf-fps');
-  if (Result < EPSILON) then
-    Result := 0;
 end;
 
 // -----------------------------------------------------------------------------
@@ -2259,10 +2226,8 @@ var
   pVals: Pmpv_node;
   Key: String;
   DestStride: Integer;
-  CopyOk: Boolean;
 begin
   Result := NIL;
-  CopyOk := False;
   if not FInitialized or (FMPV_HANDLE = NIL) then Exit;
 
   case AScreenshotMode of
@@ -2333,16 +2298,7 @@ begin
             DestPtr := Result.RawImage.Data;
             DestStride := Result.RawImage.Description.BytesPerLine;
 
-            // never write past the bitmap: a raw image that is not 32-bit
-            // (or smaller than expected) overflowed the heap, and the access
-            // violation came later, anywhere
-            CopyOk := (DestPtr <> NIL) and (Result.RawImage.Description.BitsPerPixel = 32) and
-              (DestStride >= w * 4) and (stride >= w * 4) and
-              (Result.RawImage.DataSize >= PtrUInt(DestStride) * PtrUInt(h));
-
-            if not CopyOk then
-              // nothing copied
-            else if (stride = w * 4) and (DestStride = w * 4) then
+            if (stride = w * 4) and (DestStride = w * 4) then
             begin
               Move(SrcPtr^, DestPtr^, w * 4 * h);
             end
@@ -2358,9 +2314,6 @@ begin
           finally
             Result.EndUpdate(False);
           end;
-
-          if not CopyOk then
-            FreeAndNil(Result);
         end;
       end;
     finally
@@ -3406,6 +3359,23 @@ begin
 
   if Assigned(FGL) then
   begin
+    {$IFDEF LCLCocoa}
+    // LCL Cocoa remembers the view of the last mouse down ("tracked control")
+    // and clears it only with the mouse up on that same view. A right click
+    // on the video opens the popup menu, which takes the mouse up, so it is
+    // left pointing to this view; freeing it (Close, another video) left a
+    // dangling object, messaged on the next drag of a scroll bar knob
+    // (NSScroller trackKnob -> TCocoaApplication.nextEventMatchingMask ->
+    // objc_msgSend: access violation). Nothing is being dragged here.
+    {$IF DECLARED(TrackedControl)}
+    TrackedControl := NIL; // Lazarus 4.x
+    {$ELSEIF DECLARED(TCocoaMouseEventState)}
+    if Assigned(CocoaWidgetSetState) then
+      CocoaWidgetSetState.mouseEvent.trackedControl := NIL; // Lazarus 5 (main)
+    {$ELSE}
+      {$WARNING LCL Cocoa: tracked control not found, the scroll bar access violation is not fixed}
+    {$ENDIF}
+    {$ENDIF}
     FreeAndNil(FGL);
     Invalidate;
   end;
