@@ -143,11 +143,16 @@ procedure TMPVPlayerRenderThread.Execute;
 begin
   while not Terminated do
   begin
+    // RTLEventWaitFor already resets the event (auto reset); resetting it
+    // again after rendering lost the updates signalled meanwhile (the last
+    // frame of a burst of seeks wasn't drawn)
     RTLEventWaitFor(Event);
     try
       if ForceInvalidateContext then
       begin
         ForceInvalidateContext := False;
+        if IsRenderActive then
+          mpv_render_context_update(mpvRenderContext^);
         InvalidateContext;
       end
       else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then
@@ -156,7 +161,6 @@ begin
       //on E: Exception do
         //DebugLog('RenderSDL Thread EXCEPTION: ' + E.ClassName + ': ' + E.Message);
     end;
-    RTLEventResetEvent(Event);
   end;
 end;
 
@@ -313,7 +317,9 @@ procedure TMPVPlayerRenderSDL.Render(const ForceInvalidate: Boolean = False);
 begin
   if Assigned(FThread) then
   begin
-    FThread.ForceInvalidateContext := ForceInvalidate;
+    // don't clear a forced render still pending with a normal update
+    if ForceInvalidate then
+      FThread.ForceInvalidateContext := True;
     RTLEventSetEvent(FThread.Event);
   end;
 end;

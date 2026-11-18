@@ -342,10 +342,19 @@ begin
           {$IFDEF DARWIN}
           LoopPool := NSAutoreleasePool.alloc.init;
           {$ENDIF}
+          // RTLEventWaitFor already resets the event (auto reset). It was
+          // also reset after rendering: an update that mpv signalled while
+          // this frame was being rendered was lost, so after a burst of
+          // seeks (frame steps with the mouse wheel...) the last frame was
+          // never drawn and the video showed an older one until the next
+          // update (e.g. a double click on the timeline).
           try
             if ForceInvalidateContext then
             begin
               ForceInvalidateContext := False;
+              // acknowledge a pending frame too, it is drawn now
+              if IsRenderActive then
+                mpv_render_context_update(mpvRenderContext^);
               InvalidateContext(False);
             end
             else if IsRenderActive and ((mpv_render_context_update(mpvRenderContext^) and MPV_RENDER_UPDATE_FRAME) > 0) then
@@ -360,8 +369,6 @@ begin
           except
           end;
           {$ENDIF}
-
-          RTLEventResetEvent(Event);
         end;
       end;
     except
@@ -627,7 +634,9 @@ begin
 
   if Assigned(FThread) then
   begin
-    FThread.ForceInvalidateContext := ForceInvalidate;
+    // don't clear a forced render still pending with a normal update
+    if ForceInvalidate then
+      FThread.ForceInvalidateContext := True;
     RTLEventSetEvent(FThread.Event);
   end;
 end;
