@@ -1,4 +1,4 @@
-2.5 (14/11/2026)
+2.5 (21/11/2026)
 
 * Added `MPVPlayer.SceneDetect.pas` with `TMPVSceneDetector`: shot change detection in its own thread with a second, private libmpv instance (no audio, no window, untimed), reading a 48x27 colour image of every frame through the software render API. Each frame's time comes from the filter chain itself, so the cuts are frame exact, also with VFR and streams that don't start at 0.
 * Hard cuts: frames are compared by luma and colour (a cut between shots of the same brightness is seen), by blocks that may move up to 3 pixels (pans, zooms and camera shake aren't cuts), and every frame of the 4 before against every frame of the 4 after (flashes and bad frames of up to 3 frames aren't cuts). A cut must be several times (`Ratio`) over the rest of a +/- 0.25 s window, so fast motion isn't taken as a cut.
@@ -9,6 +9,7 @@
 * Fixed `mpv_get_property_double`, `mpv_get_property_int64` and `mpv_get_property_boolean` returning garbage when the property can't be read: now 0 / False (check `Error`).
 * Fixed `GetScreenshotToBitmap` writing past the bitmap when the raw image wasn't 32-bit or was smaller than expected (heap corruption and a later access violation); now it returns NIL.
 * Fixed a seek to a time inside a frame (double click on the timeline, a time not aligned to frames) showing the next frame: the seek goes to the start of the frame.
+* Fixed: Subtitle size shrinking in the preview with wide aspect ratios (e.g. 2.35:1) or when auto-crop is enabled.
 
 2.4 (08/11/2026)
 
