@@ -3212,9 +3212,12 @@ end;
 
 procedure TMPVPlayer.RecalcOSDMetrics;
 var
-  VideoW, VideoH: Integer;
+  VideoW, VideoH, VideoDW, VideoDH: Int64;
+  Crop: TRect;
+  VideoAspect: Double;
   EffectiveW, EffectiveH: Double;
   BlackBarX, BlackBarY: Double;
+  FontRefH: Double;
   TargetMarginXPx, TargetMarginYPx: Double;
   MarginMultiplier: Double;
   NewFontSize: Double;
@@ -3222,21 +3225,37 @@ var
 begin
   if Assigned(FCore) and FCore.Initialized then
   begin
+    // aspect of the image as it's shown: "width"/"height" are the coded size,
+    // without the display aspect (anamorphic) or the crop (auto-crop), so a
+    // cropped 2.35:1 video was measured as the 16:9 frame it comes in
     VideoW := FCore.GetVideoWidth;
     VideoH := FCore.GetVideoHeight;
-
-    if (VideoW > 0) and (VideoH > 0) and (ClientHeight > 0) then
+    VideoDW := FCore.mpv_get_property_int64('video-params/dw');
+    VideoDH := FCore.mpv_get_property_int64('video-params/dh');
+    if (VideoDW <= 0) or (VideoDH <= 0) then
     begin
-      if (ClientWidth / ClientHeight) < (VideoW / VideoH) then
+      VideoDW := VideoW;
+      VideoDH := VideoH;
+    end;
+
+    if (VideoW > 0) and (VideoH > 0) and (VideoDW > 0) and (VideoDH > 0) and (ClientHeight > 0) then
+    begin
+      Crop := FCore.VideoCrop;
+      if not Crop.IsEmpty then
+        VideoAspect := (Crop.Width * (VideoDW / VideoW)) / (Crop.Height * (VideoDH / VideoH))
+      else
+        VideoAspect := VideoDW / VideoDH;
+
+      if (ClientWidth / ClientHeight) < VideoAspect then
       begin
         EffectiveW := ClientWidth;
-        EffectiveH := ClientWidth * (VideoH / VideoW);
+        EffectiveH := ClientWidth / VideoAspect;
         BlackBarX := 0;
         BlackBarY := (ClientHeight - EffectiveH) / 2.0;
       end
       else
       begin
-        EffectiveW := ClientHeight * (VideoW / VideoH);
+        EffectiveW := ClientHeight * VideoAspect;
         EffectiveH := ClientHeight;
         BlackBarX := (ClientWidth - EffectiveW) / 2.0;
         BlackBarY := 0;
@@ -3248,8 +3267,16 @@ begin
 
       NewMarginX := Round(TargetMarginXPx * (720.0 / ClientHeight));
       NewMarginY := Round(TargetMarginYPx * (720.0 / ClientHeight));
+      // the text size follows the height of a 16:9 frame as wide as the
+      // image (not more than the window), not the image height: a wide video
+      // (2.35:1, or auto-cropped) has a lower image and the text got smaller,
+      // it must look the same as with the black bars in the image. Narrower
+      // videos (4:3) keep their height.
+      FontRefH := EffectiveW * (9 / 16);
+      if FontRefH > ClientHeight then FontRefH := ClientHeight;
+      if FontRefH < EffectiveH then FontRefH := EffectiveH;
       // decimals keep the scaling continuous; 0.1 steps avoid needless updates
-      NewFontSize := Round(FFontSize * (EffectiveH / ClientHeight) * 10) / 10;
+      NewFontSize := Round(FFontSize * (FontRefH / ClientHeight) * 10) / 10;
 
       if (Abs(NewFontSize - FLastFontSize) > 0.01) or (NewMarginX <> FLastMarginX) or (NewMarginY <> FLastMarginY) then
       begin
@@ -4507,6 +4534,8 @@ end;
 procedure TMPVPlayer.SetVideoCrop(const ARect: TRect);
 begin
   FCore.SetVideoCrop(ARect);
+  // the image area changes: margins (and size) follow the shown image
+  RecalcOSDMetrics;
 end;
 
 // -----------------------------------------------------------------------------
